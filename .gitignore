@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# IDE
+.idea/
+
+# 本地用户数据（不入库：棋谱归档 + 大模型 API Key 隐私）
+records/
+config/llm_keys.json

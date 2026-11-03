@@ -1,0 +1,20 @@
+# -*- coding: utf-8 -*-
+"""配置包：集中管理全局默认参数与命令行参数合并逻辑。"""
+from .settings import (
+    WINDOW_WIDTH, WINDOW_HEIGHT, FPS, GAME, MODE, FIRST_PLAYER,
+    PLAYER1_AI, PLAYER2_AI, BOARD_SIZE,
+    MCTS_ITERATIONS, MCTS_TIME_LIMIT, AB_MAX_DEPTH, AB_TIME_LIMIT, RANDOM_SEED,
+    GAME_DEFAULTS, ACTIVE_GAMES, VALID_GAMES, VALID_MODES, VALID_AIS,
+    SHOW_LOG, DEBUG,
+)
+from .args import load_config, Config
+
+__all__ = [
+    "load_config", "Config",
+    "WINDOW_WIDTH", "WINDOW_HEIGHT", "FPS", "GAME", "MODE", "FIRST_PLAYER",
+    "PLAYER1_AI", "PLAYER2_AI", "BOARD_SIZE",
+    "MCTS_ITERATIONS", "MCTS_TIME_LIMIT", "AB_MAX_DEPTH", "AB_TIME_LIMIT",
+    "RANDOM_SEED",
+    "GAME_DEFAULTS", "ACTIVE_GAMES", "VALID_GAMES", "VALID_MODES", "VALID_AIS",
+    "SHOW_LOG", "DEBUG",
+]
