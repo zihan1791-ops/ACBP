@@ -106,10 +106,34 @@ class GameController:
         self.ai_thinking = True
         move = player.ai.select_move(self.board, on_progress=on_progress)
         self.ai_thinking = False
+        return self.apply_ai_move(move, player)
 
+    def apply_ai_move(self, move: Optional[Tuple[int, int]],
+                      player: Optional[Player] = None,
+                      validate: bool = False) -> Optional[Tuple[int, int]]:
+        """
+        应用一步已经算好的 AI 走子：同步 step_ai 与多进程调度层共用，
+        保证快照、棋谱、终局保存等收尾逻辑只有一份。
+
+        参数：
+            move:     AI 选出的坐标；
+            player:   落子方（省略则取当前回合方）；
+            validate: 多进程路径置 True——局面可能在计算期间被悔棋 / 重开改变，
+                      此时丢弃过期走子，避免把旧局面的棋下到新棋盘上。
+        """
+        if self.board.game_over:
+            return None
+        player = player or self.current_player
+        if player.is_human:
+            return None
         if move is None:
             self.last_event = f"{player.describe()} 无合法步可走"
             return None
+        if validate:
+            legal = self.board.get_legal_moves()
+            if legal and move not in legal:
+                self.last_event = "局面已变化，AI 走子已丢弃"
+                return None
 
         self._push_snapshot()
         self.board.apply_move(move)

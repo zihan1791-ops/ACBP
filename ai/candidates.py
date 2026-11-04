@@ -210,7 +210,8 @@ def _gomoku_point_score(board, r: int, c: int, player: int) -> int:
             count += 1
             rr += dr
             cc += dc
-        if not board.in_bounds(rr, cc) or board.board[rr][cc] == EMPTY:
+        # 棋盘外没有可落子点，视为封闭端而不是开放端。
+        if board.in_bounds(rr, cc) and board.board[rr][cc] == EMPTY:
             open_ends += 1
         # 反方向延伸
         rr, cc = r - dr, c - dc
@@ -218,7 +219,7 @@ def _gomoku_point_score(board, r: int, c: int, player: int) -> int:
             count += 1
             rr -= dr
             cc -= dc
-        if not board.in_bounds(rr, cc) or board.board[rr][cc] == EMPTY:
+        if board.in_bounds(rr, cc) and board.board[rr][cc] == EMPTY:
             open_ends += 1
         best = max(best, _pattern_score(count, open_ends))
     board.board[r][c] = EMPTY
