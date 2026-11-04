@@ -109,9 +109,10 @@ def _gomoku_line_score(board, r: int, c: int, dr: int, dc: int, player: int) -> 
 
     # 统计两端是否为空位（开放端数量）
     open_ends = 0
-    if not board.in_bounds(pr, pc) or board.board[pr][pc] == EMPTY:
+    # 棋盘外没有可落子点，视为封闭端而不是开放端。
+    if board.in_bounds(pr, pc) and board.board[pr][pc] == EMPTY:
         open_ends += 1
-    if not board.in_bounds(rr, cc) or board.board[rr][cc] == EMPTY:
+    if board.in_bounds(rr, cc) and board.board[rr][cc] == EMPTY:
         open_ends += 1
 
     return _pattern_score(count, open_ends)

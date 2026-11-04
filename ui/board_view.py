@@ -1,19 +1,22 @@
 # -*- coding: utf-8 -*-
 """
-棋盘视图（BoardView）。
+棋盘视图（BoardView）—— 编辑式棋谱刊物中的「版面棋盘」。
 
-职责：
-1. 根据棋盘类型绘制网格 / 方格、星点、棋子与最后一手标记；
-2. 完成「像素坐标 ↔ 棋盘行列坐标」互转，供鼠标点击落子使用；
-3. 可选地为当前人类回合高亮提示合法落子点。
+职责与坐标换算逻辑保持原样（这是与规则层的契约，不能改）：
+    _layout / cell_center / pixel_to_cell / _is_intersection_board
+    draw(surface, show_legal_hint=False) / draw_candidate_marks(surface, top_moves)
 
-五子棋、围棋为「交叉点棋盘」，黑白棋为「方格棋盘」，两类布局在内部自动区分。
+视觉重设计：
+1. 棋墩纸底 + 双线装帧外框，四边印等宽坐标（A… / 15…01），像印出来的棋谱图；
+2. 网格用发丝墨线，外框线略重；星位改成小十字而非圆点；
+3. 棋子去掉塑料高光：黑子实墨 + 描边，白子纸白 + 细墨圈；
+4. 最后一手用朱砂四角括号定位，合法点用淡墨小点，AI 候选带等宽序号。
 """
 
 import pygame
 from typing import Optional, Tuple
 
-from . import theme
+from . import theme, assets, atmosphere
 from core.base_board import EMPTY, BLACK
 
 
@@ -23,9 +26,11 @@ class BoardView:
     def __init__(self, rect, board) -> None:
         self.rect = pygame.Rect(rect)
         self.board = board
+        self._coord_key = None
+        self._coord_items = []
         self._layout()
 
-    # ===================== 布局计算 =====================
+    # ===================== 布局计算（契约，逻辑不变） =====================
 
     def _layout(self) -> None:
         """根据棋盘尺寸与视图矩形计算格距、原点坐标，保证棋盘居中。"""
@@ -66,12 +71,45 @@ class BoardView:
             return row, col
         return None
 
+    # ===================== 坐标标注（预渲染缓存） =====================
+
+    def _prepare_coords(self) -> None:
+        """棋谱坐标只在布局变化时重建，避免 AI 高频重绘时反复渲染文字。"""
+        key = (self.board.size, round(self.cell, 2),
+               round(self.origin_x, 1), round(self.origin_y, 1))
+        if self._coord_key == key:
+            return
+        self._coord_key = key
+        n = self.board.size
+        size = theme.S(14)
+        f = assets.font("mono", size)
+        items = []
+        # 坐标是信息文字，用 INK_SOFT 而非仅装饰用的 INK_FAINT
+        for i in range(n):
+            col = f.render(chr(65 + i) if i < 26 else str(i), True, theme.INK_SOFT)
+            items.append((col, (self.origin_x + i * self.cell - col.get_width() / 2,
+                                self.origin_y - theme.S(30))))
+            row = f.render("%02d" % (n - i), True, theme.INK_SOFT)
+            items.append((row, (self.origin_x - theme.S(42) - row.get_width() / 2,
+                                self.origin_y + i * self.cell - row.get_height() / 2)))
+        self._coord_items = items
+
     # ===================== 绘制 =====================
 
     def draw(self, surface: pygame.Surface, show_legal_hint: bool = False) -> None:
-        """绘制完整棋盘：底色 → 网格 → 合法提示 → 棋子 → 最后一手标记。"""
-        # 棋盘底色圆角矩形
-        pygame.draw.rect(surface, theme.BOARD_BG, self.rect, border_radius=theme.RADIUS)
+        """绘制完整棋盘：装帧 → 坐标 → 网格 → 合法提示 → 棋子 → 最后一手。"""
+        s = theme.S
+        pygame.draw.rect(surface, theme.BOARD_PAPER, self.rect,
+                         border_radius=theme.RADIUS)
+        pygame.draw.rect(surface, theme.RULE, self.rect,
+                         width=1, border_radius=theme.RADIUS)
+        inner = self.rect.inflate(-s(8), -s(8))
+        pygame.draw.rect(surface, theme.RULE_LIGHT, inner,
+                         width=1, border_radius=theme.RADIUS)
+
+        self._prepare_coords()
+        for glyph, pos in self._coord_items:
+            surface.blit(glyph, (int(pos[0]), int(pos[1])))
 
         if self._is_intersection_board:
             self._draw_grid_lines(surface)
@@ -86,30 +124,32 @@ class BoardView:
         self._draw_last_move(surface)
 
     def _draw_grid_lines(self, surface: pygame.Surface) -> None:
-        """绘制交叉点棋盘的横竖网格线。"""
+        """交叉点棋盘：外框线略重，内部发丝线。"""
         n = self.board.size
         end = n - 1
         for i in range(n):
             x = self.origin_x + i * self.cell
             y = self.origin_y + i * self.cell
-            pygame.draw.line(surface, theme.GRID,
-                             (x, self.origin_y), (x, self.origin_y + end * self.cell), 1)
-            pygame.draw.line(surface, theme.GRID,
-                             (self.origin_x, y), (self.origin_x + end * self.cell, y), 1)
+            color = theme.INK_SOFT if i in (0, end) else theme.RULE
+            width = 2 if i in (0, end) else 1
+            pygame.draw.line(surface, color, (x, self.origin_y),
+                             (x, self.origin_y + end * self.cell), width)
+            pygame.draw.line(surface, color, (self.origin_x, y),
+                             (self.origin_x + end * self.cell, y), width)
 
     def _draw_square_lines(self, surface: pygame.Surface) -> None:
-        """绘制黑白棋方格棋盘的分格线。"""
+        """黑白棋方格棋盘：细墨分格线。"""
         n = self.board.size
         for i in range(n + 1):
             x = self.origin_x + i * self.cell
             y = self.origin_y + i * self.cell
-            pygame.draw.line(surface, theme.GRID,
-                             (x, self.origin_y), (x, self.origin_y + n * self.cell), 1)
-            pygame.draw.line(surface, theme.GRID,
-                             (self.origin_x, y), (self.origin_x + n * self.cell, y), 1)
+            pygame.draw.line(surface, theme.RULE, (x, self.origin_y),
+                             (x, self.origin_y + n * self.cell))
+            pygame.draw.line(surface, theme.RULE, (self.origin_x, y),
+                             (self.origin_x + n * self.cell, y))
 
     def _draw_star_points(self, surface: pygame.Surface) -> None:
-        """绘制交叉点棋盘星位（15 路五子棋与 9 路围棋使用经典星点位置）。"""
+        """星位改画成小十字，比圆点更贴印刷棋谱图。"""
         n = self.board.size
         if n == 15:
             points = [(3, 3), (3, 11), (7, 7), (11, 3), (11, 11)]
@@ -117,18 +157,23 @@ class BoardView:
             points = [(2, 2), (2, 6), (4, 4), (6, 2), (6, 6)]
         else:
             return
+        arm = max(theme.S(3), int(self.cell * 0.10))
         for r, c in points:
             x, y = self.cell_center(r, c)
-            pygame.draw.circle(surface, theme.STAR_POINT, (int(x), int(y)), theme.S(3))
+            x, y = int(x), int(y)
+            pygame.draw.line(surface, theme.STAR_POINT,
+                             (x - arm, y), (x + arm, y), 1)
+            pygame.draw.line(surface, theme.STAR_POINT,
+                             (x, y - arm), (x, y + arm), 1)
 
     def _draw_legal_hints(self, surface: pygame.Surface) -> None:
-        """在当前合法空位上绘制淡绿色小圆点，提示人类可落子位置。"""
-        for r, c in self.board.get_legal_moves():
-            x, y = self.cell_center(r, c)
-            pygame.draw.circle(surface, theme.ACCENT, (int(x), int(y)), theme.S(4))
+        """人类回合：在合法空位上点一个淡墨小点，不抢棋子注意力。"""
+        r = max(theme.S(2), int(self.cell * 0.07))
+        for row, col in self.board.get_legal_moves():
+            x, y = self.cell_center(row, col)
+            pygame.draw.circle(surface, theme.INK_FAINT, (int(x), int(y)), r)
 
     def _draw_all_stones(self, surface: pygame.Surface) -> None:
-        """遍历棋盘绘制全部棋子。"""
         n = self.board.size
         for r in range(n):
             for c in range(n):
@@ -136,56 +181,53 @@ class BoardView:
                 if piece != EMPTY:
                     self._draw_stone(surface, r, c, piece)
 
-    def _draw_stone(self, surface: pygame.Surface, row: int, col: int, piece: int) -> None:
-        """绘制单枚棋子：柔和投影 + 圆形主体 + 顶部高光。"""
+    def _draw_stone(self, surface: pygame.Surface,
+                    row: int, col: int, piece: int) -> None:
+        """棋子：极淡落子投影 + 实墨 / 纸白圆 + 细描边，去掉塑料高光。"""
         x, y = self.cell_center(row, col)
         radius = int(self.cell * 0.42)
-
-        # 投影（向右下轻微偏移）
-        shadow_offset = max(theme.S(2), int(self.cell * 0.06))
+        off = max(theme.S(2), int(self.cell * 0.045))
         pygame.draw.circle(surface, theme.STONE_SHADOW,
-                           (int(x + shadow_offset), int(y + shadow_offset)), radius)
+                           (int(x + off), int(y + off)), radius)
 
-        # 棋子主体
-        stone_color = theme.BLACK_STONE if piece == BLACK else theme.WHITE_STONE
-        pygame.draw.circle(surface, stone_color, (int(x), int(y)), radius)
-
-        # 顶部高光（白色小椭圆，营造圆润质感）
-        highlight_r = int(radius * 0.45)
-        pygame.draw.ellipse(
-            surface, theme.STONE_HIGHLIGHT if piece == BLACK else (225, 225, 225),
-            (int(x - highlight_r), int(y - highlight_r),
-             highlight_r * 2, int(highlight_r * 1.2)))
+        black = piece == BLACK
+        pygame.draw.circle(surface,
+                           theme.BLACK_STONE if black else theme.WHITE_STONE,
+                           (int(x), int(y)), radius)
+        pygame.draw.circle(surface,
+                           theme.STONE_HIGHLIGHT if black else theme.RULE,
+                           (int(x), int(y)), radius, 1)
 
     def _draw_last_move(self, surface: pygame.Surface) -> None:
-        """在最后一手棋子上绘制红棕色圆环标记，便于追踪最近落子。"""
+        """最后一手用朱砂四角括号定位，而不是盖住棋子的圆环。"""
         if self.board.last_move is None:
             return
         r, c = self.board.last_move
         x, y = self.cell_center(r, c)
-        pygame.draw.circle(surface, theme.WARN, (int(x), int(y)),
-                           int(self.cell * 0.18), 2)
+        side = int(self.cell * 0.74)
+        box = pygame.Rect(int(x - side / 2), int(y - side / 2), side, side)
+        atmosphere.brackets(surface, box, theme.CINNABAR,
+                            max(4, int(self.cell * 0.12)), 2)
 
     def draw_candidate_marks(self, surface: pygame.Surface, top_moves) -> None:
         """
-        在棋盘上高亮 AI 正在评估的候选走法（思考可视化）。
-
-        参数：
-            top_moves: 思考状态中的 Top 候选列表，元素为 (坐标, 访问数/序, 胜率/分值)；
-                       第 1 名用强调色大点，第 2~3 名用辅助蓝小点。
+        在棋盘上高亮 AI 正在评估的候选走法，并印上等宽序号。
+        第 1 名朱砂实心，其余灰墨空心 —— 单强调色纪律。
         """
+        s = theme.S
         for idx, item in enumerate(top_moves[:3]):
             move = item[0]
             if move is None or not self.board.in_bounds(*move):
                 continue
             x, y = self.cell_center(move[0], move[1])
+            x, y = int(x), int(y)
+            radius = int(self.cell * (0.24 if idx == 0 else 0.20))
             if idx == 0:
-                pygame.draw.circle(surface, theme.ACCENT, (int(x), int(y)),
-                                   int(self.cell * 0.28))
-                pygame.draw.circle(surface, theme.TEXT_ON_ACCENT, (int(x), int(y)),
-                                   int(self.cell * 0.28), 2)
+                pygame.draw.circle(surface, theme.CINNABAR, (x, y), radius)
+                num_color = theme.PAPER_ON_RED
             else:
-                pygame.draw.circle(surface, theme.BLUE, (int(x), int(y)),
-                                   int(self.cell * 0.20))
-                pygame.draw.circle(surface, theme.PANEL, (int(x), int(y)),
-                                   int(self.cell * 0.20), 1)
+                pygame.draw.circle(surface, theme.SURFACE, (x, y), radius)
+                pygame.draw.circle(surface, theme.INK_SOFT, (x, y), radius, 1)
+                num_color = theme.INK
+            num = assets.font("mono", s(14)).render(str(idx + 1), True, num_color)
+            surface.blit(num, num.get_rect(center=(x, y)))
