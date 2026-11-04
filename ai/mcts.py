@@ -52,25 +52,34 @@ class _MCTSNode:
     """MCTS 搜索树节点。"""
 
     def __init__(self, state, parent: Optional["_MCTSNode"],
-                 move: Optional[Tuple[int, int]], player: int) -> None:
+                 move: Optional[Tuple[int, int]], player: int,
+                 restrict: Optional[List[Tuple[int, int]]] = None) -> None:
         self.state = state                                  # 节点代表的棋盘局面副本
         self.parent = parent                                # 父节点引用
         self.move = move                                    # 走到本节点的那一步棋
         self.player = player                                # 本节点局面中将要落子的玩家
         self.children: List[_MCTSNode] = []                 # 已扩展子节点
-        # 候选走法：邻域裁剪 + 启发式排序（高价值在前）
-        self.untried_moves: List[Tuple[int, int]] = candidate_moves(state)
-        if len(self.untried_moves) > 1:
-            self.untried_moves = sort_moves_by_heuristic(
-                state, self.untried_moves, player)
-            # 五子棋：对手活三 / 冲三的防守点前置，优先扩展与访问
-            if type(state).__name__ == "GomokuBoard":
-                defs = gomoku_defense_points(state, player)
-                if defs:
-                    self.untried_moves = (
-                        [m for m in defs if m in self.untried_moves]
-                        + [m for m in self.untried_moves if m not in defs]
-                    )
+        if restrict:
+            # 根节点限定搜索分支（「大模型提名 + MCTS 验证」模式）：只搜
+            # 提名点，且保持提名顺序——_expand 从尾部 pop，故先反转，让
+            # 模型首选最先被展开。
+            legal_set = set(state.get_legal_moves())
+            self.untried_moves: List[Tuple[int, int]] = [
+                m for m in reversed(restrict) if m in legal_set]
+        else:
+            # 候选走法：邻域裁剪 + 启发式排序（高价值在前）
+            self.untried_moves = candidate_moves(state)
+            if len(self.untried_moves) > 1:
+                self.untried_moves = sort_moves_by_heuristic(
+                    state, self.untried_moves, player)
+                # 五子棋：对手活三 / 冲三的防守点前置，优先扩展与访问
+                if type(state).__name__ == "GomokuBoard":
+                    defs = gomoku_defense_points(state, player)
+                    if defs:
+                        self.untried_moves = (
+                            [m for m in defs if m in self.untried_moves]
+                            + [m for m in self.untried_moves if m not in defs]
+                        )
         self.visits = 0                                     # 节点被访问次数
         self.wins = 0.0                                     # 本节点玩家视角累计胜场（平局计 0.5）
 
@@ -107,12 +116,24 @@ class MCTSAI(BaseAI):
         # 每步最大迭代次数 / 最大思考秒数，二者先到即停
         self.iterations = max(1, int(config.mcts_iterations))
         self.time_limit = float(config.mcts_time)
+        # 可选的分支限制：非空时根节点只在这些走法内搜索（LLM 提名 + MCTS 验证）
+        self.restrict: Optional[List[Tuple[int, int]]] = None
+
+    def set_restrict(self, moves: Optional[List[Tuple[int, int]]]) -> None:
+        """限定根节点候选走法；传 None 恢复全量候选搜索。"""
+        self.restrict = list(moves) if moves else None
 
     # -------------------- 对外接口 --------------------
 
     def select_move(self, board, on_progress=None) -> Optional[Tuple[int, int]]:
         """执行一轮 MCTS 迭代，返回根节点下最优走法。"""
         legal = candidate_moves(board)
+        if self.restrict:
+            # 提名点优先：只要提名里还有合法步，就只搜这些分支
+            allowed = set(board.get_legal_moves())
+            narrowed = [m for m in self.restrict if m in allowed]
+            if narrowed:
+                legal = narrowed
         if not legal:
             return None
 
@@ -132,7 +153,8 @@ class MCTSAI(BaseAI):
             return quick_move
 
         # ---- 2. 主搜索循环 ----
-        root = _MCTSNode(board.copy(), None, None, board.current_player)
+        root = _MCTSNode(board.copy(), None, None, board.current_player,
+                          restrict=self.restrict)
         iterations = 0
         # 进度推送间隔：总迭代的 2%（至少 5 次、至多 200 次）推送一次可视化
         emit_interval = max(5, min(200, self.iterations // 50))

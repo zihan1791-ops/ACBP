@@ -243,7 +243,8 @@ class ReplayScene:
     # ===================== 续局设置态（选择 AI 介入） =====================
 
     ROLE_LABELS: dict = {None: "人类", "mcts": "MCTS", "alphabeta": "Alpha-Beta",
-                         "random": "随机", "llm": "大模型"}
+                         "random": "随机", "llm": "大模型",
+                         "llm_mcts": "大模型+MCTS"}
 
     def _open_setup(self) -> None:
         """进入续局设置：可重新指定双方角色后从回放点继续对弈。"""
@@ -264,8 +265,12 @@ class ReplayScene:
                        on_select) -> None:
             options = [(None, "人类"), ("mcts", "MCTS"),
                        ("alphabeta", "Alpha-Beta"), ("random", "随机"),
-                       ("llm", "大模型")]
-            btn_w, btn_h, gap = theme.S(130), theme.S(40), theme.S(14)
+                       ("llm", "大模型"), ("llm_mcts", "大模型+MCTS")]
+            gap = theme.S(12)
+            btn_w = min(theme.S(130),
+                        (self.w - theme.S(48) - gap * (len(options) - 1))
+                        // len(options))
+            btn_h = theme.S(40)
             total_w = len(options) * btn_w + (len(options) - 1) * gap
             start_x = cx - total_w // 2
             for i, (value, text) in enumerate(options):
@@ -507,6 +512,7 @@ class ReplayScene:
         if not role:
             return "未知"
         if role.get("type") == "ai":
-            return {"mcts": "MCTS", "alphabeta": "Alpha-Beta",
-                    "random": "随机"}.get(role.get("ai"), role.get("ai"))
+            # 统一走 ROLE_LABELS，避免新增算法时这里漏登记、界面显示英文标识
+            key = role.get("ai")
+            return ReplayScene.ROLE_LABELS.get(key, key)
         return "人类"

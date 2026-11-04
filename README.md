@@ -8,7 +8,8 @@
 **升级要点**：取消难度分档（AI 统一按最大努力预算全力搜索）、围棋入口暂停、
 算法层全面强化（候选裁剪 / 威胁预检与排序 / 迭代加深 / 启发式 rollout / 胜率选步）、
 **AI 思考过程实时可视化**（进度条 + 棋盘候选高亮 + 阶段/深度/耗时/最佳步/胜率）、
-**大模型对局**（游戏内输入 API Key 自动保存、人类/算法/大模型任意组合对战）。
+**大模型对局**（游戏内输入 API Key 自动保存、人类/算法/大模型任意组合对战）、
+**大模型+MCTS 混合棋手**（大模型提名少数候选分支，MCTS 在其内搜索验证）。
 
 ---
 
@@ -48,7 +49,7 @@ python start.py
 |---|---|---|
 | `GAME` | 棋种 | `'gomoku'` 五子棋 / `'othello'` 黑白棋；`None` 进菜单选择 |
 | `MODE` | 对局模式 | `'human_vs_ai'` 人机 / `'ai_vs_ai'` 算法 PK / `'human_vs_human'` 人人；`None` 进菜单 |
-| `PLAYER1_AI` | 黑方算法 | `'mcts'` / `'alphabeta'` / `'random'` / `'llm'`（大模型）；`None` 表示人类 |
+| `PLAYER1_AI` | 黑方算法 | `'mcts'` / `'alphabeta'` / `'random'` / `'llm'`（大模型）/ `'llm_mcts'`（大模型+MCTS）；`None` 表示人类 |
 | `PLAYER2_AI` | 白方算法 | 同上；`None` 表示人类 |
 | `BOARD_SIZE` | 棋盘尺寸 | `None` 取棋种默认；五子棋 9/11/13/15，黑白棋 8 |
 | `MCTS_ITERATIONS` | MCTS 每步迭代上限 | 整数（默认 5000） |
@@ -76,6 +77,9 @@ python start.py --game othello --mode ai_vs_ai --p1-ai alphabeta --p2-ai mcts --
 
 # 示例：大模型对局（需先在游戏内「大模型设置」配置 API Key）
 python start.py --game gomoku --mode ai_vs_ai --p1-ai llm --p2-ai llm
+
+# 示例：大模型提名 + MCTS 验证，对阵纯 MCTS
+python start.py --game gomoku --mode ai_vs_ai --p1-ai llm_mcts --p2-ai mcts --llm-proposals 3
 ```
 
 | 命令行参数 | 对应全局变量 | 说明 |
@@ -98,6 +102,9 @@ python start.py --game gomoku --mode ai_vs_ai --p1-ai llm --p2-ai llm
 | `--llm-model` | `LLM_MODEL` | 大模型模型名（默认 deepseek-flash） |
 | `--llm-base-url` | `LLM_BASE_URL` | 大模型 API 基地址（OpenAI 兼容） |
 | `--llm-timeout` | `LLM_TIMEOUT` | 大模型单次请求超时秒数 |
+| `--llm-max-tokens` | `LLM_MAX_TOKENS` | 大模型单次最大输出 token 数 |
+| `--llm-thinking` | `LLM_ENABLE_THINKING` | 允许大模型先思考再落子（默认关闭） |
+| `--llm-proposals` | `LLM_PROPOSALS` | 「大模型+MCTS」每步提名的候选分支数（默认 3） |
 
 ---
 
@@ -130,6 +137,7 @@ hw-1/
 │   ├── alpha_beta.py                # Alpha-Beta：迭代加深 + 威胁排序 + 强制预检 + 时间上限
 │   ├── evaluator.py                 # 各棋种局面启发式评估（黑白棋三要素评估）
 │   ├── llm_ai.py                    # 大模型棋手（局面编码 → API 调用 → 解析重试 → 兜底）
+│   ├── llm_assisted.py              # 大模型提名 + MCTS 验证的混合棋手（llm_mcts）
 │   ├── random_ai.py                 # 随机基线 AI（测试与对照）
 │   └── factory.py                   # 算法名称 → AI 实例 工厂
 │
@@ -257,28 +265,60 @@ DeepSeek 官方 API 的 `deepseek-flash` 模型，OpenAI 兼容协议，后续�
 
 ### 2. 大模型如何走棋
 
-- 每步把当前局面编码为文本（己方 / 对方棋子坐标 + 规则与策略提示）
-  发给大模型，要求返回落子坐标；
+- 每步把当前局面编码为文本发给大模型，内容包括：**文本棋盘**（带行列号，
+  ● 己方 / ○ 对手 / · 空位）、双方子数、规则与策略、**战术要点**
+  （成五点 / 必须堵的五点 / 可成活四的进攻点 / 必堵的活三端点；黑白棋额外给
+  各步翻子数、可占角与对手可占角）、以及**优先落子清单**（战术点在前的
+  24 个候选，其余只报数量）。模型对二维网格的理解远好于坐标元组列表，
+  先替它把棋型算好，能显著减少「看不出对方活三」的漏防；
 - 自动校验落子合法性，非法或请求失败自动重试
   （`LLM_MAX_RETRIES`，默认 3 次），仍失败则随机兜底；
+  思考型模型偶发返回空 content 时，会回退解析 `reasoning_content` 里的
+  结论坐标，减少无谓重试；
 - 网络请求在后台线程执行，等待期间界面不冻结，并实时显示
   「等待大模型响应 N 秒」的进度提示（复用 AI 思考可视化面板）；
 - 棋谱会记录大模型身份与具体模型名（如 `{"type":"ai","ai":"llm",
   "model":"deepseek-flash"}`），回放 / 续局照常支持。
 
-### 3. 调参
+> 实测结论：纯大模型（`llm`）没有搜索与强制战术校验，对 MCTS 会连续漏防
+> 对手活三、被单向活四击败。要「能打」，用下面的 `llm_mcts` 混合棋手。
+
+### 3. 大模型+MCTS 混合棋手（`llm_mcts`）
+
+把大模型的棋理判断和 MCTS 的搜索验证串成两步：
+
+1. **提名**：`LlmAI.propose()` 让大模型从战术要点里挑出至多 `LLM_PROPOSALS`
+   个候选分支（默认 3 个，按模型给出的优先级排序）；
+2. **验证**：`MCTSAI.set_restrict()` 把根节点分支限定在这几个点上，用完整
+   迭代做模拟胜负验证，选出真正占优的一步；其余候选不参与搜索，等于把
+   有限预算集中在模型认为值得算的分支上。
+
+可靠性兜底：
+
+- 模型调用失败或提名不足时，自动用启发式候选（邻域裁剪 + 棋理分）补齐；
+- MCTS 的强制预检（能赢先赢、该挡必挡）在搜索前执行，命中即直接落子，
+  不受提名限制影响——战术正确性优先于模型偏好；
+- 所有候选点都经过棋盘合法性与根节点过滤，不会产生非法落子；
+- 界面显示「大模型提名 N 个候选 → MCTS 验证」两阶段进度与根节点胜率。
+
+角色选择里对应「**大模型+MCTS**」，命令行用 `--p1-ai llm_mcts --p2-ai mcts`。
+
+### 4. 调参
 
 `config/settings.py`（PyCharm 全局变量）或命令行（`--llm-model`、
-`--llm-base-url`、`--llm-timeout`）：
+`--llm-base-url`、`--llm-timeout`、`--llm-max-tokens`、`--llm-thinking`）：
 
 | 全局变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `LLM_BASE_URL` | `https://api.deepseek.com` | API 基地址（OpenAI 兼容） |
 | `LLM_MODEL` | `deepseek-flash` | 模型名（DeepSeek V4.1-Flash） |
 | `LLM_TIMEOUT` | `60.0` | 单次请求超时秒数 |
+| `LLM_MAX_TOKENS` | `8192` | 单次最大输出 token 数（DeepSeek 合法范围 1~393216） |
+| `LLM_ENABLE_THINKING` | `False` | 是否让模型先思考再回答；关闭时约 1 秒/步，开启后 20~40 秒/步且需更大 token 预算 |
 | `LLM_MAX_RETRIES` | `3` | 失败 / 非法落子的重试次数 |
 | `LLM_TEMPERATURE` | `0.2` | 采样温度（棋类建议低温度） |
 | `LLM_KEY_FILE` | `config/llm_keys.json` | Key 保存文件 |
+| `LLM_PROPOSALS` | `3` | 「大模型+MCTS」每步提名的候选分支数 |
 
 ---
 
@@ -383,6 +423,13 @@ A：主菜单「大模型设置」输入 DeepSeek API Key 保存（明文存于�
 即可。默认模型 `deepseek-flash`（DeepSeek V4.1-Flash），可在 `settings.py`
 改 `LLM_BASE_URL` / `LLM_MODEL` 接入其它 OpenAI 兼容服务商。未配置 Key 时
 该方会提示并随机兜底，不会卡死对局。
+
+**Q：纯大模型为什么打不过 MCTS？怎么让它变强？**
+A：大模型每步只看一次局面、没有搜索、也没有强制战术校验，对手的活三 /
+冲四很容易被漏掉；MCTS 每步上千次模拟，还有「能赢先赢、该挡必挡」的预检。
+把角色选为「**大模型+MCTS**」（`llm_mcts`）即可：大模型只负责提名少数候选
+分支，MCTS 在候选内做完整搜索验证，既保留棋理判断，又用模拟胜负兜住误判。
+调 `LLM_PROPOSALS`（默认 3）可控制提名分支数。
 
 **Q：为什么不再有难度档位？**
 A：用户拍板统一按最大努力预算搜索；强度差异通过直接修改预算变量实现，

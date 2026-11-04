@@ -30,7 +30,7 @@ class MainMenu:
     }
     AI_LABELS: Dict[Optional[str], str] = {
         None: "人类", "mcts": "MCTS", "alphabeta": "Alpha-Beta",
-        "random": "随机", "llm": "大模型",
+        "random": "随机", "llm": "大模型", "llm_mcts": "大模型+MCTS",
     }
 
     def __init__(self, cfg, on_start: Callable[[dict], None],

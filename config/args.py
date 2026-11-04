@@ -80,6 +80,14 @@ def _build_parser() -> argparse.ArgumentParser:
                              "OpenAI 兼容格式，如 https://api.deepseek.com")
     parser.add_argument("--llm-timeout", type=float, default=None,
                         help="大模型单次请求超时秒数（覆盖全局 LLM_TIMEOUT）")
+    parser.add_argument("--llm-max-tokens", type=int, default=None,
+                        help="大模型单次最大输出 token 数（覆盖全局 LLM_MAX_TOKENS）")
+    parser.add_argument("--llm-thinking", action="store_true", default=None,
+                        help="允许大模型先思考再落子（覆盖全局 LLM_ENABLE_THINKING；"
+                             "开启后单步更慢，需配合更大的 --llm-max-tokens）")
+    parser.add_argument("--llm-proposals", type=int, default=None,
+                        help="「大模型+MCTS」模式每步提名的候选分支数"
+                             "（覆盖全局 LLM_PROPOSALS，默认 3）")
 
     # ---- AI 搜索参数（统一最大努力预算，命令行仅作显式覆盖） ----
     parser.add_argument("--mcts-iterations", type=int, default=None,
@@ -143,9 +151,12 @@ def load_config(argv=None) -> Config:
         "llm_base_url": S.LLM_BASE_URL,
         "llm_model": S.LLM_MODEL,
         "llm_timeout": S.LLM_TIMEOUT,
+        "llm_max_tokens": S.LLM_MAX_TOKENS,
+        "llm_enable_thinking": S.LLM_ENABLE_THINKING,
         "llm_max_retries": S.LLM_MAX_RETRIES,
         "llm_temperature": S.LLM_TEMPERATURE,
         "llm_key_file": S.LLM_KEY_FILE,
+        "llm_proposals": S.LLM_PROPOSALS,
     }
 
     # ---- 2. 命令行显式参数覆盖全局变量（值不为 None 才覆盖） ----
@@ -187,6 +198,12 @@ def load_config(argv=None) -> Config:
         data["llm_base_url"] = args.llm_base_url
     if args.llm_timeout is not None:
         data["llm_timeout"] = args.llm_timeout
+    if args.llm_max_tokens is not None:
+        data["llm_max_tokens"] = args.llm_max_tokens
+    if args.llm_thinking is not None:
+        data["llm_enable_thinking"] = args.llm_thinking
+    if args.llm_proposals is not None:
+        data["llm_proposals"] = args.llm_proposals
 
     # ---- 3. 棋盘尺寸：未指定时取当前棋种默认值 ----
     if data["game"] is not None:

@@ -220,8 +220,8 @@ class GameScene:
                       size=theme.FONT_SMALL, color=theme.ACCENT_DARK)
             return
 
-        # 进度条（MCTS 按迭代总量、Alpha-Beta 按深度总量）
-        if think.algo == "mcts":
+        # 进度条（MCTS / 大模型+MCTS 按迭代总量、Alpha-Beta 按深度总量）
+        if think.algo in ("mcts", "llm_mcts"):
             self.think_bar.max_value = think.total or 1
             self.think_bar.label = f"AI 思考中 · {think.phase}"
         else:
@@ -230,7 +230,8 @@ class GameScene:
         self.think_bar.draw(surface, think.done)
 
         # 统计行：深度 / 节点数、耗时
-        depth_text = f"深度 {think.depth}/{think.max_depth}" if think.algo != "mcts" else ""
+        depth_text = (f"深度 {think.depth}/{think.max_depth}"
+                      if think.algo not in ("mcts", "llm_mcts") else "")
         info = f"{depth_text} 已处理 {think.done}  耗时 {think.elapsed:.1f}s"
         draw_text(surface, info, panel.x + theme.S(18), panel.y + theme.S(352),
                   size=theme.FONT_SMALL, color=theme.TEXT_LIGHT)
@@ -270,8 +271,8 @@ class GameScene:
 
     @staticmethod
     def _fmt_value(think) -> str:
-        """格式化当前最佳步的价值：MCTS 显示胜率，Alpha-Beta 显示评分。"""
-        if think.algo == "mcts":
+        """格式化当前最佳步的价值：MCTS / 混合棋手显示胜率，Alpha-Beta 显示评分。"""
+        if think.algo in ("mcts", "llm_mcts"):
             return f"{think.best_value:.1%}"
         return f"{think.best_value:.0f} 分"
 

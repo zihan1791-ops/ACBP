@@ -51,6 +51,7 @@ FIRST_PLAYER = 1
 #   'alphabeta' —— Alpha-Beta 剪枝搜索
 #   'random'    —— 随机基线 AI（用于流程测试与算法对照）
 #   'llm'       —— 大模型 AI（通过 API 调用，如 DeepSeek deepseek-flash）
+#   'llm_mcts'  —— 大模型提名候选 + MCTS 搜索验证的混合棋手（推荐）
 #   None        —— 该方为人类玩家
 # 约定：PLAYER1_AI 对应先手（黑方），PLAYER2_AI 对应后手（白方）。
 # 例如人机大战且人类先手：PLAYER1_AI = None，PLAYER2_AI = 'mcts'；
@@ -111,7 +112,7 @@ ACTIVE_GAMES = ['gomoku', 'othello']
 # 合法选项集合，供参数校验使用（与对外开放选项保持一致）
 VALID_GAMES = ACTIVE_GAMES
 VALID_MODES = ['human_vs_ai', 'ai_vs_ai', 'human_vs_human']
-VALID_AIS = ['mcts', 'alphabeta', 'random', 'llm']
+VALID_AIS = ['mcts', 'alphabeta', 'random', 'llm', 'llm_mcts']
 
 
 # ===================== 三·五、大模型 AI（LLM）参数 =====================
@@ -127,6 +128,18 @@ LLM_MODEL = "deepseek-flash"
 # 单次请求超时（秒）
 LLM_TIMEOUT = 60.0
 
+# 单次请求的最大输出 token 数；DeepSeek 合法范围 [1, 393216]，越界会被 API
+# 以 400 invalid_request_error 拒绝。思考型模型会先消耗思考 token，
+# 调得过小（如 <1024）容易被思考内容吃满、正式回复被截断为空。
+LLM_MAX_TOKENS = 8192
+
+# 是否让大模型「先思考再回答」。
+# False（默认）：请求里带 thinking={"type": "disabled"}，模型直接输出坐标，
+#                单步约 1 秒，且思考不会吃满 max_tokens 导致 content 为空；
+# True：          允许模型输出 reasoning_content 再给结论，单步可达 20~40 秒，
+#                棋力略好，但需保证 LLM_MAX_TOKENS 足够大（建议 16384 以上）。
+LLM_ENABLE_THINKING = False
+
 # 请求失败 / 返回非法落子时的最大重试次数（超出后随机兜底一步）
 LLM_MAX_RETRIES = 3
 
@@ -135,6 +148,12 @@ LLM_TEMPERATURE = 0.2
 
 # API Key 保存文件（相对项目根目录；游戏内主菜单「大模型设置」可输入/修改）
 LLM_KEY_FILE = "config/llm_keys.json"
+
+# 「大模型提名 + MCTS 验证」模式（AI 标识 'llm_mcts'）的每步候选数：
+# 大模型先从战术后选里提名 N 个分支，MCTS 只在这些分支内做完整搜索。
+# 太小（1）等价于纯大模型走子、失去搜索验证；太大则每个分支分到的模拟
+# 次数变少、且模型的选择意义被稀释。3~5 是较均衡的取值。
+LLM_PROPOSALS = 3
 
 
 # ===================== 五、棋谱与日志 =====================

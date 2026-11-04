@@ -60,6 +60,8 @@ def save_api_key(api_key: str, model: Optional[str] = None) -> None:
     model = model or "deepseek-flash"
     keys = _load_all()
     keys[model] = api_key.strip()
+    # keys[model] = "sk-13f1d729c57e47868419d466f4d186ca"
+
     try:
         os.makedirs(os.path.dirname(KEY_FILE), exist_ok=True)
         with open(KEY_FILE, "w", encoding="utf-8") as f:
