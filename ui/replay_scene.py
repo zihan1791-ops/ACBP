@@ -243,7 +243,7 @@ class ReplayScene:
     # ===================== 续局设置态（选择 AI 介入） =====================
 
     ROLE_LABELS: dict = {None: "人类", "mcts": "MCTS", "alphabeta": "Alpha-Beta",
-                         "random": "随机", "llm": "大模型"}
+                         "random": "随机"}
 
     def _open_setup(self) -> None:
         """进入续局设置：可重新指定双方角色后从回放点继续对弈。"""
@@ -263,8 +263,7 @@ class ReplayScene:
         def option_row(y: int, label: str, current,
                        on_select) -> None:
             options = [(None, "人类"), ("mcts", "MCTS"),
-                       ("alphabeta", "Alpha-Beta"), ("random", "随机"),
-                       ("llm", "大模型")]
+                       ("alphabeta", "Alpha-Beta"), ("random", "随机")]
             btn_w, btn_h, gap = theme.S(130), theme.S(40), theme.S(14)
             total_w = len(options) * btn_w + (len(options) - 1) * gap
             start_x = cx - total_w // 2

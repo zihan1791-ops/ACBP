@@ -40,6 +40,6 @@ class Player:
         """返回完整身份描述，用于侧栏信息展示。"""
         if self.is_human:
             return f"{self.side_label}（人类）"
-        # 优先使用 AI 的中文显示名（如大模型），无则退回算法标识
+        # 优先使用 AI 的中文显示名，无则退回算法标识
         display = getattr(self.ai, "display_name", self.ai.name)
         return f"{self.side_label}（{display}）"

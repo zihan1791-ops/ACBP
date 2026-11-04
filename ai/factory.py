@@ -12,7 +12,6 @@ from .base_ai import BaseAI
 from .mcts import MCTSAI
 from .alpha_beta import AlphaBetaAI
 from .random_ai import RandomAI
-from .llm_ai import LlmAI
 from utils.logger import log_warn
 
 # 算法标识 → 算法类 的注册表
@@ -20,7 +19,6 @@ _REGISTRY = {
     "mcts": MCTSAI,
     "alphabeta": AlphaBetaAI,
     "random": RandomAI,
-    "llm": LlmAI,
 }
 
 

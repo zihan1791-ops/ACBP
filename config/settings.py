@@ -50,12 +50,10 @@ FIRST_PLAYER = 1
 #   'mcts'      —— 蒙特卡洛树搜索
 #   'alphabeta' —— Alpha-Beta 剪枝搜索
 #   'random'    —— 随机基线 AI（用于流程测试与算法对照）
-#   'llm'       —— 大模型 AI（通过 API 调用，如 DeepSeek deepseek-flash）
 #   None        —— 该方为人类玩家
 # 约定：PLAYER1_AI 对应先手（黑方），PLAYER2_AI 对应后手（白方）。
 # 例如人机大战且人类先手：PLAYER1_AI = None，PLAYER2_AI = 'mcts'；
-# 算法 PK 示例：PLAYER1_AI = 'mcts'，PLAYER2_AI = 'alphabeta'；
-# 大模型对局示例：PLAYER1_AI = 'llm'，PLAYER2_AI = 'llm'（需先配置 API Key）。
+# 算法 PK 示例：PLAYER1_AI = 'mcts'，PLAYER2_AI = 'alphabeta'。
 PLAYER1_AI = None
 PLAYER2_AI = None
 
@@ -111,30 +109,7 @@ ACTIVE_GAMES = ['gomoku', 'othello']
 # 合法选项集合，供参数校验使用（与对外开放选项保持一致）
 VALID_GAMES = ACTIVE_GAMES
 VALID_MODES = ['human_vs_ai', 'ai_vs_ai', 'human_vs_human']
-VALID_AIS = ['mcts', 'alphabeta', 'random', 'llm']
-
-
-# ===================== 三·五、大模型 AI（LLM）参数 =====================
-# 大模型棋手通过「OpenAI 兼容格式」的 /v1/chat/completions 接口对局。
-# 默认接入 DeepSeek 官方 API；如需切换其它兼容服务商，改 BASE_URL 即可。
-
-# API 基地址（末尾不带 /v1）：DeepSeek 官方为 https://api.deepseek.com
-LLM_BASE_URL = "https://api.deepseek.com"
-
-# 模型名：DeepSeek 官方当前可用 deepseek-flash（V4.1-Flash）与 deepseek-v4-pro
-LLM_MODEL = "deepseek-flash"
-
-# 单次请求超时（秒）
-LLM_TIMEOUT = 60.0
-
-# 请求失败 / 返回非法落子时的最大重试次数（超出后随机兜底一步）
-LLM_MAX_RETRIES = 3
-
-# 采样温度：越小越稳定（棋类对局建议低温度，避免随机乱下）
-LLM_TEMPERATURE = 0.2
-
-# API Key 保存文件（相对项目根目录；游戏内主菜单「大模型设置」可输入/修改）
-LLM_KEY_FILE = "config/llm_keys.json"
+VALID_AIS = ['mcts', 'alphabeta', 'random']
 
 
 # ===================== 五、棋谱与日志 =====================

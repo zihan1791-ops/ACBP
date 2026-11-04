@@ -6,6 +6,5 @@ __pycache__/
 # IDE
 .idea/
 
-# 本地用户数据（不入库：棋谱归档 + 大模型 API Key 隐私）
+# 本地用户数据（不入库：棋谱归档）
 records/
-config/llm_keys.json

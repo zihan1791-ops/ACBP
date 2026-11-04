@@ -30,16 +30,14 @@ class MainMenu:
     }
     AI_LABELS: Dict[Optional[str], str] = {
         None: "人类", "mcts": "MCTS", "alphabeta": "Alpha-Beta",
-        "random": "随机", "llm": "大模型",
+        "random": "随机",
     }
 
     def __init__(self, cfg, on_start: Callable[[dict], None],
-                 on_replay: Optional[Callable[[], None]] = None,
-                 on_llm_settings: Optional[Callable[[], None]] = None) -> None:
+                 on_replay: Optional[Callable[[], None]] = None) -> None:
         self.cfg = cfg
         self.on_start = on_start
         self.on_replay = on_replay
-        self.on_llm_settings = on_llm_settings
 
         # 初始选项：优先使用配置中已指定的值，否则采用默认
         self.game_kind: str = cfg.game or "gomoku"
@@ -144,7 +142,7 @@ class MainMenu:
             on_select=lambda v: self._set("board_size", v),
         )
 
-        # ---- 底部：开始对局主按钮 + 棋谱回放 + 大模型设置 ----
+        # ---- 底部：开始对局主按钮 + 棋谱回放 ----
         start_rect = pygame.Rect(cx - theme.S(120), theme.S(500), theme.S(240), theme.S(52))
         self.buttons.append(Button(
             start_rect, "开始对局", on_click=self._start, accent=True,
@@ -155,13 +153,6 @@ class MainMenu:
                                       theme.S(200), theme.S(40))
             self.buttons.append(Button(
                 replay_rect, "棋谱回放", on_click=self.on_replay,
-                font_size=theme.FONT_BODY,
-            ))
-        if self.on_llm_settings is not None:
-            llm_rect = pygame.Rect(cx + theme.S(110), theme.S(562),
-                                   theme.S(200), theme.S(40))
-            self.buttons.append(Button(
-                llm_rect, "大模型设置", on_click=self.on_llm_settings,
                 font_size=theme.FONT_BODY,
             ))
 
@@ -234,7 +225,7 @@ class MainMenu:
         # 主标题
         draw_text(surface, "棋类综合对战平台", cx, theme.S(44),
                   size=theme.FONT_TITLE, color=theme.TEXT, align="center")
-        draw_text(surface, "五子棋 · 黑白棋 ｜ 人机大战 ｜ 算法 PK ｜ 大模型对局",
+        draw_text(surface, "五子棋 · 黑白棋 ｜ 人机大战 ｜ 算法 PK",
                   cx, theme.S(76), size=theme.FONT_SMALL, color=theme.TEXT_LIGHT, align="center")
 
         # 绘制各组标题（与按钮行一一对应）
@@ -249,7 +240,6 @@ class MainMenu:
 
         # 底部操作提示
         draw_text(surface,
-                  "提示：选择「大模型」需先在「大模型设置」中配置 API Key；"
                   "AI 思考过程会在对局界面实时可视化。",
                   cx, theme.S(624), size=theme.FONT_SMALL,
                   color=theme.TEXT_LIGHT, align="center")

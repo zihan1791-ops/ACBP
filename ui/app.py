@@ -17,7 +17,6 @@ from . import theme
 from .main_menu import MainMenu
 from .game_scene import GameScene
 from .replay_scene import ReplayScene
-from .llm_settings_scene import LlmSettingsScene
 from game.modes import create_game, resume_game_from_record
 from utils.logger import log_info
 
@@ -30,11 +29,6 @@ class App:
 
         # pygame 初始化与窗口创建（物理像素尺寸，适配高分屏缩放）
         pygame.init()
-        # 初始化剪贴板支持（大模型设置中粘贴 API Key 用；失败不影响运行）
-        try:
-            pygame.scrap.init()
-        except Exception:
-            pass
         pygame.display.set_caption("棋类综合对战平台 · 五子棋 / 黑白棋")
         w = theme.S(cfg.window_width)
         h = theme.S(cfg.window_height)
@@ -56,8 +50,7 @@ class App:
             })
         else:
             self.scene = MainMenu(self.cfg, self._on_menu_start,
-                                  on_replay=self._open_replay,
-                                  on_llm_settings=self._open_llm_settings)
+                                  on_replay=self._open_replay)
 
     # ===================== 场景切换 =====================
 
@@ -71,14 +64,9 @@ class App:
                                  on_resume=self._resume_from_replay)
 
     def _back_to_menu(self) -> None:
-        """从对局 / 回放 / 大模型设置场景返回主菜单。"""
+        """从对局 / 回放场景返回主菜单。"""
         self.scene = MainMenu(self.cfg, self._on_menu_start,
-                              on_replay=self._open_replay,
-                              on_llm_settings=self._open_llm_settings)
-
-    def _open_llm_settings(self) -> None:
-        """主菜单点击「大模型设置」后的回调：进入 API Key 配置场景。"""
-        self.scene = LlmSettingsScene(self.cfg, self._back_to_menu)
+                              on_replay=self._open_replay)
 
     def _resume_from_replay(self, record: dict, step: int,
                             p1_ai=None, p2_ai=None) -> None:

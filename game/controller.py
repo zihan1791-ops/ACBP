@@ -209,12 +209,7 @@ class GameController:
         """把玩家对象序列化为棋谱中的角色信息。"""
         if player.is_human:
             return {"type": "human"}
-        role = {"type": "ai", "ai": player.ai.name}
-        # 大模型棋手额外记录所调用的模型名，便于复盘时区分
-        model = getattr(player.ai, "model", None)
-        if model:
-            role["model"] = model
-        return role
+        return {"type": "ai", "ai": player.ai.name}
 
     def _mode_label(self) -> str:
         """根据双方身份推断对局模式（人机大战 / 算法 PK / 人人对战）。"""

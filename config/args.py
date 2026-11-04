@@ -66,20 +66,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # ---- 双方 AI 算法 ----
     parser.add_argument("--p1-ai", choices=S.VALID_AIS, default=None,
-                        help="先手（黑方）算法：mcts / alphabeta / random / llm；"
+                        help="先手（黑方）算法：mcts / alphabeta / random；"
                              "不传该参数表示人类")
     parser.add_argument("--p2-ai", choices=S.VALID_AIS, default=None,
-                        help="后手（白方）算法：mcts / alphabeta / random / llm；"
+                        help="后手（白方）算法：mcts / alphabeta / random；"
                              "不传该参数表示人类")
-
-    # ---- 大模型 AI 参数（默认走 DeepSeek 官方 API） ----
-    parser.add_argument("--llm-model", default=None,
-                        help="大模型模型名（覆盖全局 LLM_MODEL），如 deepseek-flash")
-    parser.add_argument("--llm-base-url", default=None,
-                        help="大模型 API 基地址（覆盖全局 LLM_BASE_URL），"
-                             "OpenAI 兼容格式，如 https://api.deepseek.com")
-    parser.add_argument("--llm-timeout", type=float, default=None,
-                        help="大模型单次请求超时秒数（覆盖全局 LLM_TIMEOUT）")
 
     # ---- AI 搜索参数（统一最大努力预算，命令行仅作显式覆盖） ----
     parser.add_argument("--mcts-iterations", type=int, default=None,
@@ -139,13 +130,6 @@ def load_config(argv=None) -> Config:
         "show_log": S.SHOW_LOG,
         "debug": S.DEBUG,
         "fps": S.FPS,
-        # ---- 大模型 AI 参数 ----
-        "llm_base_url": S.LLM_BASE_URL,
-        "llm_model": S.LLM_MODEL,
-        "llm_timeout": S.LLM_TIMEOUT,
-        "llm_max_retries": S.LLM_MAX_RETRIES,
-        "llm_temperature": S.LLM_TEMPERATURE,
-        "llm_key_file": S.LLM_KEY_FILE,
     }
 
     # ---- 2. 命令行显式参数覆盖全局变量（值不为 None 才覆盖） ----
@@ -181,12 +165,6 @@ def load_config(argv=None) -> Config:
         data["debug"] = args.debug
     if args.show_log is not None:
         data["show_log"] = args.show_log
-    if args.llm_model is not None:
-        data["llm_model"] = args.llm_model
-    if args.llm_base_url is not None:
-        data["llm_base_url"] = args.llm_base_url
-    if args.llm_timeout is not None:
-        data["llm_timeout"] = args.llm_timeout
 
     # ---- 3. 棋盘尺寸：未指定时取当前棋种默认值 ----
     if data["game"] is not None:

@@ -1,14 +1,13 @@
 # 棋类综合对战平台（五子棋 · 黑白棋）
 
 基于 **Python + pygame** 的模块化桌面对战程序，支持**人机大战**、**AI 算法 PK**、
-**人人对战**与**大模型对局**；内置 **MCTS（蒙特卡洛树搜索）**、**Alpha-Beta 剪枝**
-两类强化算法，并可接入 **DeepSeek 等大模型 API** 作为棋手参与对局。全项目采用
+**人人对战**；内置 **MCTS（蒙特卡洛树搜索）**、**Alpha-Beta 剪枝**
+两类强化算法。全项目采用
 分层模块化设计，规则、AI、对局、界面相互解耦，关键逻辑均配有详细中文注释。
 
 **升级要点**：取消难度分档（AI 统一按最大努力预算全力搜索）、围棋入口暂停、
 算法层全面强化（候选裁剪 / 威胁预检与排序 / 迭代加深 / 启发式 rollout / 胜率选步）、
-**AI 思考过程实时可视化**（进度条 + 棋盘候选高亮 + 阶段/深度/耗时/最佳步/胜率）、
-**大模型对局**（游戏内输入 API Key 自动保存、人类/算法/大模型任意组合对战）。
+**AI 思考过程实时可视化**（进度条 + 棋盘候选高亮 + 阶段/深度/耗时/最佳步/胜率）。
 
 ---
 
@@ -48,7 +47,7 @@ python start.py
 |---|---|---|
 | `GAME` | 棋种 | `'gomoku'` 五子棋 / `'othello'` 黑白棋；`None` 进菜单选择 |
 | `MODE` | 对局模式 | `'human_vs_ai'` 人机 / `'ai_vs_ai'` 算法 PK / `'human_vs_human'` 人人；`None` 进菜单 |
-| `PLAYER1_AI` | 黑方算法 | `'mcts'` / `'alphabeta'` / `'random'` / `'llm'`（大模型）；`None` 表示人类 |
+| `PLAYER1_AI` | 黑方算法 | `'mcts'` / `'alphabeta'` / `'random'`；`None` 表示人类 |
 | `PLAYER2_AI` | 白方算法 | 同上；`None` 表示人类 |
 | `BOARD_SIZE` | 棋盘尺寸 | `None` 取棋种默认；五子棋 9/11/13/15，黑白棋 8 |
 | `MCTS_ITERATIONS` | MCTS 每步迭代上限 | 整数（默认 5000） |
@@ -58,7 +57,6 @@ python start.py
 | `RANDOM_SEED` | 随机种子（可复现对局） | 整数；`None` 不固定 |
 | `SAVE_RECORDS` | 终局自动保存棋谱 | `True` 保存 / `False` 关闭 |
 | `RECORDS_DIR` | 棋谱保存目录 | 相对项目根，默认 `records` |
-| `LLM_BASE_URL` / `LLM_MODEL` | 大模型接入 | 默认 DeepSeek 官方 + `deepseek-flash`，详见第五章 |
 
 > 难度说明：本项目**不再划分 easy / medium / hard 档位**。AI 统一使用上述
 > 「最大努力预算」全力搜索；想调整强度直接修改上表预算变量即可。
@@ -73,9 +71,6 @@ python start.py --game gomoku --mode human_vs_ai --p2-ai mcts
 
 # 示例：算法 PK，黑白棋 Alpha-Beta 对 MCTS，收紧搜索预算观察棋力变化
 python start.py --game othello --mode ai_vs_ai --p1-ai alphabeta --p2-ai mcts --ab-depth 4 --mcts-iterations 2000
-
-# 示例：大模型对局（需先在游戏内「大模型设置」配置 API Key）
-python start.py --game gomoku --mode ai_vs_ai --p1-ai llm --p2-ai llm
 ```
 
 | 命令行参数 | 对应全局变量 | 说明 |
@@ -95,9 +90,6 @@ python start.py --game gomoku --mode ai_vs_ai --p1-ai llm --p2-ai llm
 | `--records-dir` | `RECORDS_DIR` | 自定义棋谱保存目录 |
 | `--debug` | `DEBUG` | 开启调试日志 |
 | `--show-log` | `SHOW_LOG` | 开启常规日志 |
-| `--llm-model` | `LLM_MODEL` | 大模型模型名（默认 deepseek-flash） |
-| `--llm-base-url` | `LLM_BASE_URL` | 大模型 API 基地址（OpenAI 兼容） |
-| `--llm-timeout` | `LLM_TIMEOUT` | 大模型单次请求超时秒数 |
 
 ---
 
@@ -113,8 +105,7 @@ hw-1/
 │
 ├── config/                          # 配置层：全局参数 + 命令行合并
 │   ├── settings.py                  # PyCharm 调参入口（大写全局变量，无难度档位）
-│   ├── args.py                     # argparse 参数解析与优先级合并
-│   └── llm_keys.py                 # 大模型 API Key 本地持久化（config/llm_keys.json）
+│   └── args.py                     # argparse 参数解析与优先级合并
 │
 ├── core/                            # 规则层（纯逻辑，不依赖 pygame）
 │   ├── base_board.py                # 抽象棋盘基类与统一接口契约
@@ -129,7 +120,6 @@ hw-1/
 │   ├── mcts.py                      # MCTS：启发式 rollout + 先验排序 + 胜率选步 + 强制预检
 │   ├── alpha_beta.py                # Alpha-Beta：迭代加深 + 威胁排序 + 强制预检 + 时间上限
 │   ├── evaluator.py                 # 各棋种局面启发式评估（黑白棋三要素评估）
-│   ├── llm_ai.py                    # 大模型棋手（局面编码 → API 调用 → 解析重试 → 兜底）
 │   ├── random_ai.py                 # 随机基线 AI（测试与对照）
 │   └── factory.py                   # 算法名称 → AI 实例 工厂
 │
@@ -144,11 +134,9 @@ hw-1/
 │   ├── assets.py                    # 中文字体加载与缓存
 │   ├── board_view.py                # 棋盘网格、棋子绘制、坐标换算、候选高亮
 │   ├── widgets.py                   # 按钮、面板、文本、进度条等通用控件
-│   ├── input_box.py                 # 文本输入框控件（大模型设置中输入 API Key）
-│   ├── main_menu.py                 # 开局主菜单（棋种/模式/算法/棋盘尺寸 + 回放/大模型入口）
+│   ├── main_menu.py                 # 开局主菜单（棋种/模式/算法/棋盘尺寸 + 回放入口）
 │   ├── game_scene.py                # 对局场景（棋盘交互、AI 思考面板、操作按钮）
 │   ├── replay_scene.py              # 棋谱回放场景（文件列表 + 单步/自动播放 + 续局设置）
-│   ├── llm_settings_scene.py        # 大模型设置场景（API Key 输入 / 保存 / 清除）
 │   └── app.py                       # pygame 主循环与场景切换
 │
 └── utils/                           # 公共工具
@@ -238,51 +226,7 @@ config / utils 被各层引用，不反向依赖
 
 ---
 
-## 五、大模型对局（新增）
-
-主菜单的角色选项中新增「**大模型**」身份，可实现**人类 vs 大模型、
-MCTS / Alpha-Beta vs 大模型、大模型 vs 大模型**等多种对局（先支持
-DeepSeek 官方 API 的 `deepseek-flash` 模型，OpenAI 兼容协议，后续可
-扩展到其它厂商）。
-
-### 1. 配置 API Key（游戏内输入，自动保存）
-
-主菜单点击「**大模型设置**」→ 在输入框中粘贴 API Key → 「保存」：
-
-- Key **明文保存在本机** `config/llm_keys.json`，下次对局自动读取，
-  无需重复输入；可在设置页随时修改 / 清除；
-- 未配置 Key 时若选择大模型对局，轮到该方时会提示并**随机兜底一步**，
-  保证对局不会卡死；
-- Key 只用于调用你所填的 API 服务，不会上传到本游戏以外的任何地方。
-
-### 2. 大模型如何走棋
-
-- 每步把当前局面编码为文本（己方 / 对方棋子坐标 + 规则与策略提示）
-  发给大模型，要求返回落子坐标；
-- 自动校验落子合法性，非法或请求失败自动重试
-  （`LLM_MAX_RETRIES`，默认 3 次），仍失败则随机兜底；
-- 网络请求在后台线程执行，等待期间界面不冻结，并实时显示
-  「等待大模型响应 N 秒」的进度提示（复用 AI 思考可视化面板）；
-- 棋谱会记录大模型身份与具体模型名（如 `{"type":"ai","ai":"llm",
-  "model":"deepseek-flash"}`），回放 / 续局照常支持。
-
-### 3. 调参
-
-`config/settings.py`（PyCharm 全局变量）或命令行（`--llm-model`、
-`--llm-base-url`、`--llm-timeout`）：
-
-| 全局变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `LLM_BASE_URL` | `https://api.deepseek.com` | API 基地址（OpenAI 兼容） |
-| `LLM_MODEL` | `deepseek-flash` | 模型名（DeepSeek V4.1-Flash） |
-| `LLM_TIMEOUT` | `60.0` | 单次请求超时秒数 |
-| `LLM_MAX_RETRIES` | `3` | 失败 / 非法落子的重试次数 |
-| `LLM_TEMPERATURE` | `0.2` | 采样温度（棋类建议低温度） |
-| `LLM_KEY_FILE` | `config/llm_keys.json` | Key 保存文件 |
-
----
-
-## 六、棋谱自动保存与回放（新增）
+## 五、棋谱自动保存与回放（新增）
 
 ### 1. 自动保存
 
@@ -326,7 +270,7 @@ records/
 
 ---
 
-## 七、操作说明
+## 六、操作说明
 
 - **落子**：人类回合点击棋盘对应位置；合法空位以绿色圆点提示；最后一手有红棕圆环标记。
 - **AI 思考**：AI 回合会实时显示思考进度条、阶段、耗时与候选高亮，等待其完成即可。
@@ -335,15 +279,13 @@ records/
 - **模式联动**：主菜单选项随模式自动约束——人机大战保证恰好一方人类、
   一方 AI（选黑方 AI 时白方自动为人类，反之亦然）；算法 PK 双方只能选
   算法；人人对战双方固定为人类。
-- **大模型设置**：主菜单点击「大模型设置」，输入 DeepSeek API Key 并保存，
-  之后即可在角色中选择「大模型」参与对局（Key 自动保存，下次免输入）。
 - **棋谱回放**：主菜单点击「棋谱回放」，选一局棋谱后可用 ←/→ 单步或
   空格自动播放；点「从这继续对局」可重新指定双方角色（含 AI 介入）续弈。
 - **返回主菜单**：退出当前对局，重新选择棋种与模式。
 
 ---
 
-## 八、围棋说明（入口暂停）
+## 七、围棋说明（入口暂停）
 
 围棋（go）规则与 AI 代码保留兼容，但**当前版本已暂停开放入口**：
 - 主菜单不再提供围棋选项；
@@ -355,7 +297,7 @@ records/
 
 ---
 
-## 九、常见问题
+## 八、常见问题
 
 **Q：界面中文显示为方框？**
 A：系统缺少中文字体。`ui/assets.py` 会依次匹配雅黑、黑体、Noto 等字体；
@@ -376,13 +318,6 @@ A：会。AI 计算期间界面通过进度回调实时重绘，玩家可以看�
 A：每局终局自动保存到 `records/` 按开局日期分子文件夹归档（`RECORDS_DIR`
 可改），永久保存。主菜单点击「棋谱回放」可回放历史上所有棋谱：←/→ 单步、
 空格自动播放、Esc 返回列表；「从这继续对局」可指定双方角色（AI 介入）续弈。
-
-**Q：如何接入大模型对局？**
-A：主菜单「大模型设置」输入 DeepSeek API Key 保存（明文存于本机
-`config/llm_keys.json`，下次自动读取），回到主菜单把某方角色选为「大模型」
-即可。默认模型 `deepseek-flash`（DeepSeek V4.1-Flash），可在 `settings.py`
-改 `LLM_BASE_URL` / `LLM_MODEL` 接入其它 OpenAI 兼容服务商。未配置 Key 时
-该方会提示并随机兜底，不会卡死对局。
 
 **Q：为什么不再有难度档位？**
 A：用户拍板统一按最大努力预算搜索；强度差异通过直接修改预算变量实现，
