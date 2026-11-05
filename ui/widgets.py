@@ -40,6 +40,40 @@ class Panel:
                          (self.rect.x + s(34), self.rect.y), 3)
 
 
+def build_segment_indicator(track_x: int, track_w: int, count: int,
+                            active: int, y: int) -> list:
+    """
+    生成「内容下方一排短横杠、当前段高亮」的网页式滑动指示器。
+
+    track_x / track_w 为轨道起点与总宽（与可见选项按钮组对齐），
+    count 为选项总数，active 为当前选中项索引，y 为横杠顶部坐标。
+    切换选中项时高亮段在轨道上左右滑动，选项内容不必重排。
+    """
+    s = theme.S
+    gap = s(4)
+    seg_w = max(s(4), (track_w - (count - 1) * gap) // max(1, count))
+    items = []
+    for k in range(count):
+        on = (k == active)
+        items.append({
+            "x": track_x + k * (seg_w + gap),
+            "y": y if on else y + s(1),
+            "w": seg_w,
+            "h": s(4) if on else s(2),
+            "active": on,
+        })
+    return items
+
+
+def draw_segment_indicator(surface, indicators) -> None:
+    """绘制分段指示器：当前段朱砂实心，其余为淡墨装饰线。"""
+    for item in indicators:
+        color = theme.CINNABAR if item["active"] else theme.INK_FAINT
+        pygame.draw.rect(surface, color,
+                         pygame.Rect(item["x"], item["y"],
+                                     item["w"], item["h"]))
+
+
 class Button:
     """按钮：默认 / 悬停 / 按下 / 选中 / 主操作 / 键盘焦点 / 禁用 七态。"""
 

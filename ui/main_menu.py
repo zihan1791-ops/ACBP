@@ -18,7 +18,8 @@ from typing import Callable, Optional, Dict, List, Tuple
 import pygame
 
 from . import theme, motion, assets, atmosphere
-from .widgets import Button, blit_reveal, keyboard_nav
+from .widgets import (Button, blit_reveal, keyboard_nav,
+                      build_segment_indicator, draw_segment_indicator)
 from config import GAME_DEFAULTS, VALID_GAMES, VALID_MODES, VALID_AIS
 
 
@@ -33,7 +34,8 @@ class MainMenu:
     }
     AI_LABELS: Dict[Optional[str], str] = {
         None: "人类", "mcts": "MCTS", "alphabeta": "Alpha-Beta",
-        "random": "随机",
+        "random": "随机", "iga": "改进GA", "de": "差分进化",
+        "pso": "粒子群", "abc": "人工蜂群",
     }
 
     def __init__(self, cfg, on_start: Callable[[dict], None],
@@ -50,6 +52,7 @@ class MainMenu:
 
         self.buttons: List[Button] = []
         self._rows: List[dict] = []
+        self._indicators: List[dict] = []
         self.notice = ""
         self.kb_index = 0
         self.kb_mode = False
@@ -93,6 +96,7 @@ class MainMenu:
         s = theme.S
         self.buttons.clear()
         self._rows = []
+        self._indicators = []
 
         sizes = GAME_DEFAULTS[self.game_kind]["allowed_sizes"]
         current_size = self.board_size or GAME_DEFAULTS[self.game_kind]["board_size"]
@@ -138,6 +142,11 @@ class MainMenu:
         """一行选项：左侧行号 + 中文标签，右侧按钮组统一右对齐。"""
         s = theme.S
         btn_w, btn_h, gap = s(150), s(52), s(12)
+        if len(options) > 5:
+            # 算法多时并排显示 3 个，再用 < > 循环切换，避免按钮组压到左侧标签
+            self._cycle_row(y, label, options, current, on_select,
+                            row_no, btn_h, gap)
+            return
         total_w = len(options) * btn_w + (len(options) - 1) * gap
         start_x = s(1380) - total_w
         for i, (value, text) in enumerate(options):
@@ -152,6 +161,46 @@ class MainMenu:
             "y": y, "x": s(430), "line_y": y + s(72),
             "delay": 100 + row_no * theme.MOTION["stagger"],
         })
+
+    def _cycle_row(self, y: int, label: str,
+                   options: List[Tuple[object, str]], current,
+                   on_select: Callable[[object], None],
+                   row_no: int, btn_h: int, gap: int) -> None:
+        """并排显示「前 / 当前 / 后」三个选项，< > 循环移动选中项。"""
+        s = theme.S
+        btn_w, w_arrow = s(150), s(56)
+        values = [v for v, _ in options]
+        texts = [t for _, t in options]
+        idx = values.index(current) if current in values else 0
+        n = len(values)
+        total_w = 2 * w_arrow + 3 * btn_w + 4 * gap
+        x0 = s(1380) - total_w
+
+        specs = [(x0, w_arrow, "<", values[(idx - 1) % n], False)]
+        for k, delta in enumerate((-1, 0, 1)):
+            j = (idx + delta) % n
+            x = x0 + w_arrow + gap + k * (btn_w + gap)
+            specs.append((x, btn_w, texts[j], values[j], delta == 0))
+        specs.append((x0 + w_arrow + gap + 3 * (btn_w + gap),
+                      w_arrow, ">", values[(idx + 1) % n], False))
+
+        for x, w, text, value, selected in specs:
+            btn = Button(pygame.Rect(x, y, w, btn_h), text,
+                         on_click=lambda v=value: on_select(v),
+                         selected=selected,
+                         font_size=theme.FONT_BODY)
+            btn.reveal_delay = 100 + row_no * theme.MOTION["stagger"]
+            self.buttons.append(btn)
+        self._rows.append({
+            "no": "%02d" % row_no, "label": label,
+            "y": y, "x": s(430), "line_y": y + s(72),
+            "delay": 100 + row_no * theme.MOTION["stagger"],
+        })
+        # 选项下方：整条轨道按总选项数分段，当前段朱砂高亮
+        track_x = x0 + w_arrow + gap
+        track_w = 3 * btn_w + 2 * gap
+        self._indicators.extend(build_segment_indicator(
+            track_x, track_w, n, idx, y + btn_h + s(8)))
 
     def _set(self, attr: str, value) -> None:
         """更新选项并重建按钮；同时给出一行有信息量的联动反馈。"""
@@ -253,6 +302,8 @@ class MainMenu:
             pygame.draw.line(surface, rule_color,
                              (row["x"], row["line_y"]),
                              (s(1380), row["line_y"]))
+
+        draw_segment_indicator(surface, self._indicators)
 
         # 联动反馈（仅在身份被自动调整时出现）
         if self.notice:

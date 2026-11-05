@@ -192,6 +192,46 @@ def gomoku_defense_points(board, defender: int) -> List[Tuple[int, int]]:
     return points
 
 
+def gomoku_forced_move(board, player):
+    """
+    五子棋战术强制预检（四层优先级），命中返回 (move, note)，否则 None。
+
+    1. 己方一手成五 → 直接取胜；
+    2. 对手一手成五 → 必须堵；
+    3. 己方可成活四 → 抢先制造必胜威胁；
+    4. 对手可成活四 → 强制占掉该点。这一层覆盖连续活三两端，以及
+       跳三 1011 / 1101（X_XX / XX_X）补中间空位直接连成活四的情形；
+       若没有成活四点，再退回活三 / 跳三的堵端点。
+
+    供 MCTS / Alpha-Beta / 群体优化 AI 共用，避免三份预检逻辑各自漂移。
+    """
+    if type(board).__name__ != "GomokuBoard":
+        return None
+    opponent = board.opponent(player)
+
+    my_wins = gomoku_winning_moves(board, player)
+    if my_wins:
+        return my_wins[0], "发现制胜点，直接成五"
+
+    opp_wins = gomoku_winning_moves(board, opponent)
+    if opp_wins:
+        return opp_wins[0], "检测到对手成五点，强制防守"
+
+    attacks = gomoku_attack_points(board, player)
+    if attacks:
+        return attacks[0], "己方活三成四，抢先制造活四"
+
+    # 对手下一手能直接做成活四的点最致命，含跳三补中间（1101 / 1011）
+    opp_attacks = gomoku_attack_points(board, opponent)
+    if opp_attacks:
+        return opp_attacks[0], "检测到对手活三 / 跳三成活四点，强制堵点"
+
+    defs = gomoku_defense_points(board, player)
+    if defs:
+        return defs[0], "检测到对手活三 / 跳三，堵端防守"
+    return None
+
+
 def _gomoku_point_score(board, r: int, c: int, player: int) -> int:
     """
     计算 player 若在 (r, c) 落子后，能形成的最大四方向棋型分。

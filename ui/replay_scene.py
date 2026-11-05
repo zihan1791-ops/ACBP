@@ -22,7 +22,8 @@ import pygame
 
 from . import theme, motion, assets, atmosphere
 from .board_view import BoardView
-from .widgets import Button, Panel, blit_reveal, keyboard_nav
+from .widgets import (Button, Panel, blit_reveal, keyboard_nav,
+                      build_segment_indicator, draw_segment_indicator)
 from core.base_board import BLACK
 from core.gomoku.board import GomokuBoard
 from core.othello.board import OthelloBoard
@@ -37,7 +38,9 @@ class ReplayScene:
     """棋谱回放：先选文件，再逐步复盘。"""
 
     ROLE_LABELS: dict = {None: "人类", "mcts": "MCTS",
-                         "alphabeta": "Alpha-Beta", "random": "随机"}
+                         "alphabeta": "Alpha-Beta", "random": "随机",
+                         "iga": "改进GA", "de": "差分进化",
+                         "pso": "粒子群", "abc": "人工蜂群"}
 
     def __init__(self, cfg, on_back: Callable[[], None],
                  on_resume: Optional[Callable[[dict, int], None]] = None) -> None:
@@ -65,6 +68,7 @@ class ReplayScene:
         self.setup_p1 = None
         self.setup_p2 = None
         self._row_labels: List[Tuple[str, int, int]] = []
+        self._indicators: List[dict] = []
 
         self.buttons: List[Button] = []
         self.board_view = None
@@ -231,11 +235,45 @@ class ReplayScene:
         s = self.s
         self.buttons.clear()
         self._row_labels = []
+        self._indicators = []
 
         def option_row(y: int, label: str, current, on_select, row_no: int) -> None:
             options = [(None, "人类"), ("mcts", "MCTS"),
-                       ("alphabeta", "Alpha-Beta"), ("random", "随机")]
+                       ("alphabeta", "Alpha-Beta"), ("random", "随机"),
+                       ("iga", "改进GA"), ("de", "差分进化"),
+                       ("pso", "粒子群"), ("abc", "人工蜂群")]
             btn_w, btn_h, gap = s(150), s(52), s(12)
+            if len(options) > 5:
+                # 并排显示 3 个选项，< > 循环移动选中项，避免溢出左侧标签区
+                values = [v for v, _ in options]
+                texts = [t for _, t in options]
+                idx = values.index(current) if current in values else 0
+                n = len(values)
+                w_arrow = s(56)
+                total_w = 2 * w_arrow + 3 * btn_w + 4 * gap
+                x0 = s(1380) - total_w
+                specs = [(x0, w_arrow, "<", values[(idx - 1) % n], False)]
+                for k, delta in enumerate((-1, 0, 1)):
+                    j = (idx + delta) % n
+                    x = x0 + w_arrow + gap + k * (btn_w + gap)
+                    specs.append((x, btn_w, texts[j], values[j], delta == 0))
+                specs.append((x0 + w_arrow + gap + 3 * (btn_w + gap),
+                              w_arrow, ">", values[(idx + 1) % n], False))
+                for x, w, text, value, selected in specs:
+                    rect = pygame.Rect(x, y, w, btn_h)
+                    btn = Button(rect, text,
+                                 on_click=lambda v=value: on_select(v),
+                                 selected=selected,
+                                 font_size=theme.FONT_BODY)
+                    btn.reveal_delay = 100 + row_no * theme.MOTION["stagger"]
+                    self.buttons.append(btn)
+                # 选项下方：分段横杠指示器，当前段朱砂高亮
+                track_x = x0 + w_arrow + gap
+                track_w = 3 * btn_w + 2 * gap
+                self._indicators.extend(build_segment_indicator(
+                    track_x, track_w, n, idx, y + btn_h + s(8)))
+                self._row_labels.append((label, y, row_no))
+                return
             total_w = len(options) * btn_w + (len(options) - 1) * gap
             start_x = s(1380) - total_w
             for i, (value, text) in enumerate(options):
@@ -454,6 +492,8 @@ class ReplayScene:
             pygame.draw.line(surface, theme.RULE_LIGHT,
                              (s(430), y + s(72)), (s(1380), y + s(72)))
 
+        draw_segment_indicator(surface, self._indicators)
+
     def _draw_play(self, surface: pygame.Surface) -> None:
         if self.board_view is not None:
             self.board_view.draw(surface)
@@ -546,5 +586,7 @@ class ReplayScene:
             return "未知"
         if role.get("type") == "ai":
             return {"mcts": "MCTS", "alphabeta": "Alpha-Beta",
-                    "random": "随机"}.get(role.get("ai"), role.get("ai"))
+                    "random": "随机", "iga": "改进GA", "de": "差分进化",
+                    "pso": "粒子群", "abc": "人工蜂群"}.get(
+                        role.get("ai"), role.get("ai"))
         return "人类"

@@ -46,7 +46,8 @@ from typing import Optional, Tuple, List
 from .base_ai import BaseAI
 from .candidates import (
     candidate_moves, gomoku_winning_moves, gomoku_attack_points,
-    gomoku_defense_points, sort_moves_by_heuristic, is_near_stone,
+    gomoku_defense_points, gomoku_forced_move,
+    sort_moves_by_heuristic, is_near_stone,
 )
 from .evaluator import evaluate, _OTHELLO_WEIGHTS
 from core.base_board import DRAW, EMPTY
@@ -267,49 +268,16 @@ class MCTSAI(BaseAI):
 
     def _forced_move(self, board) -> Optional[Tuple[int, int]]:
         """
-        五子棋强制进攻 / 防守预检(四层优先级,命中即返回,不再搜索)。
+        五子棋四层战术预检，统一复用 ai.candidates.gomoku_forced_move。
 
-        之所以把这几条放在 MCTS 之前,是因为它们是「确定性结论」:
-        只要存在成五点,搜索再深也不会改变胜负;而 MCTS 的模拟带有随机性,
-        可能因为噪声错过一步必胜或必防的棋。
-
-        四层顺序:
-            1. 己方下一手可成五   → 直接落子取胜;
-            2. 对手下一手可成五   → 必须堵住(冲四 / 活四都算);
-            3. 己方活三可成活四   → 抢先制造必胜威胁(进攻优先于被动防守);
-            4. 对手活三 / 跳三     → 堵住开放端,防止其形成活四。
-        其它棋种(黑白棋 / 围棋)没有这类线性成五威胁,直接返回 None。
+        确定性结论放在 MCTS 之前：模拟带随机性，可能被噪声带偏必胜 / 必防；
+        第四层额外覆盖跳三 1101 / 1011 补中间空位直接成活四的强制堵点。
         """
-        if type(board).__name__ != "GomokuBoard":
-            return None
-
-        opponent = board.opponent(self.player)
-
-        # 第 1 层:己方能成五 —— 直接取胜,任何防守都没有意义
-        my_wins = gomoku_winning_moves(board, self.player)
-        if my_wins:
-            self.think.note = "发现制胜点,直接成五"
-            return my_wins[0]
-
-        # 第 2 层:对手能成五 —— 必须堵;即使自己也有其他进攻点,
-        # 不堵就会立刻输棋,所以优先级高于第 3 层
-        opp_wins = gomoku_winning_moves(board, opponent)
-        if opp_wins:
-            self.think.note = f"检测到对手冲四({len(opp_wins)} 处),强制防守"
-            return opp_wins[0]
-
-        # 第 3 层:己方落子可形成活四 —— 对手下一手必须防守,否则自己成五,
-        # 属于「先手必胜威胁」,价值高于单纯堵对手的活三
-        attacks = gomoku_attack_points(board, self.player)
-        if attacks:
-            self.think.note = "己方活三成四,抢先制造活四"
-            return attacks[0]
-
-        # 第 4 层:对手存在活三 / 跳三 —— 堵住其开放端,避免对手下一步成活四
-        defs = gomoku_defense_points(board, self.player)
-        if defs:
-            self.think.note = f"检测到对手活三({len(defs)} 处),堵端防守"
-            return defs[0]
+        result = gomoku_forced_move(board, self.player)
+        if result is not None:
+            move, note = result
+            self.think.note = note
+            return move
         return None
 
     # ==================== 第一阶段:选择 + 第二阶段:扩展 ====================

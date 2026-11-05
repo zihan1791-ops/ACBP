@@ -20,7 +20,7 @@ from .base_ai import BaseAI
 from .evaluator import evaluate
 from .candidates import (
     candidate_moves, gomoku_winning_moves, gomoku_attack_points,
-    gomoku_defense_points, sort_moves_by_heuristic,
+    gomoku_defense_points, gomoku_forced_move, sort_moves_by_heuristic,
 )
 from utils.helpers import MoveTimer
 from utils.logger import log_debug
@@ -121,36 +121,14 @@ class AlphaBetaAI(BaseAI):
 
     def _forced_move(self, board) -> Optional[Tuple[int, int]]:
         """
-        五子棋强制进攻 / 防守预检（四层优先级）：
-        1. 己方下一手可成五 → 直接取胜；
-        2. 对手下一手可成五（冲四 / 活四）→ 必须防守；
-        3. 己方活三可成活四 → 抢先制造必胜威胁（进攻优先于被动防守）；
-        4. 对手活三 → 堵住开放端，防止对手形成活四。
-        其余棋种或没有强制点时返回 None。
+        五子棋四层战术预检，统一复用 ai.candidates.gomoku_forced_move。
+        第四层额外覆盖跳三 1101 / 1011 补中间成活四的强制堵点。
         """
-        if type(board).__name__ != "GomokuBoard":
-            return None
-
-        opponent = board.opponent(self.player)
-        my_wins = gomoku_winning_moves(board, self.player)
-        if my_wins:
-            self.think.note = "发现制胜点，直接成五"
-            return my_wins[0]
-
-        opp_wins = gomoku_winning_moves(board, opponent)
-        if opp_wins:
-            self.think.note = f"检测到对手冲四（{len(opp_wins)} 处），强制防守"
-            return opp_wins[0]
-
-        attacks = gomoku_attack_points(board, self.player)
-        if attacks:
-            self.think.note = "己方活三成四，抢先制造活四"
-            return attacks[0]
-
-        defs = gomoku_defense_points(board, self.player)
-        if defs:
-            self.think.note = f"检测到对手活三（{len(defs)} 处），堵端防守"
-            return defs[0]
+        result = gomoku_forced_move(board, self.player)
+        if result is not None:
+            move, note = result
+            self.think.note = note
+            return move
         return None
 
     # -------------------- 搜索核心 --------------------

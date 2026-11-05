@@ -16,6 +16,9 @@ AI 多进程调度层（纯前端新增模块）。
 5. worker 内部只 import 纯 Python 的 core / ai 层，不加载 pygame 或 UI 主题，
    spawn 时不会重复初始化窗口或字体。
 6. 任何环节失败都可回退同步模式（由 GameScene 负责），保证游戏仍能继续。
+7. cancel 后重建队列：Windows spawn 下被 terminate 的进程会残留 Queue
+   内部信号量计数，复用旧队列会让新 worker 永久阻塞在 task_q.get()，
+   表现为「重开一局后 AI 再也不计算」。
 
 本模块不修改 core / ai / game 的算法逻辑。
 """
@@ -95,9 +98,28 @@ class AiRunner:
         self.busy = False
         self.gen = 0
 
+    def _reset_queues(self) -> None:
+        """丢弃旧队列、换上一对干净队列（见模块说明第 7 条）。"""
+        for q in (self._task_q, self._result_q):
+            try:
+                q.cancel_join_thread()       # 避免 close 时被 feeder 线程阻塞
+            except Exception:
+                pass
+            try:
+                q.close()
+            except Exception:
+                pass
+        self._task_q = self._ctx.Queue()
+        self._result_q = self._ctx.Queue()
+
     def _ensure_started(self) -> bool:
         if self._started:
-            return True
+            if self._proc is not None and self._proc.is_alive():
+                return True
+            # worker 意外退出：清理现场并换干净队列后再拉起
+            self._proc = None
+            self._started = False
+            self._reset_queues()
         try:
             self._proc = self._ctx.Process(
                 target=_worker, args=(self._task_q, self._result_q),
@@ -129,12 +151,14 @@ class AiRunner:
 
     def poll(self):
         """
-        非阻塞取消息；队列里积压的进度只保留最新一条，避免界面处理陈旧帧。
-        收到 done / error 时自动清除 busy。
+        非阻塞取消息；终态（done / error）优先返回，不会被晚到的 progress
+        覆盖而丢失。只有当前世代的终态才解除 busy，避免旧局面的结果
+        误清标志导致重复提交。
         """
         if not self._started:
             return None
         latest = None
+        terminal = None
         while True:
             try:
                 msg = self._result_q.get_nowait()
@@ -142,13 +166,18 @@ class AiRunner:
                 break
             except Exception:
                 break
-            latest = msg
-        if latest is not None and latest[0] in ("done", "error"):
-            self.busy = False
+            if msg and msg[0] in ("done", "error"):
+                terminal = msg
+            else:
+                latest = msg
+        if terminal is not None:
+            if terminal[1] == self.gen:
+                self.busy = False
+            return terminal
         return latest
 
-    def cancel(self) -> None:
-        """悔棋 / 重开：终止 worker 并递增 gen，使在途结果全部作废。"""
+    def cancel(self, rebuild: bool = True) -> None:
+        """悔棋 / 重开 / 切场景：终止 worker、递增 gen，默认换干净队列。"""
         self.gen += 1
         self.busy = False
         self._drain(self._result_q)
@@ -162,6 +191,8 @@ class AiRunner:
                 pass
         self._proc = None
         self._started = False
+        if rebuild:
+            self._reset_queues()
 
     @staticmethod
     def _drain(queue) -> None:
@@ -178,7 +209,7 @@ class AiRunner:
                 self._task_q.put(None)
         except Exception:
             pass
-        self.cancel()
+        self.cancel(rebuild=False)
 
 
 # ===========================================================================

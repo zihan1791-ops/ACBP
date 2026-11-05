@@ -66,11 +66,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # ---- 双方 AI 算法 ----
     parser.add_argument("--p1-ai", choices=S.VALID_AIS, default=None,
-                        help="先手（黑方）算法：mcts / alphabeta / random；"
-                             "不传该参数表示人类")
+                        help="先手（黑方）算法：mcts / alphabeta / random / "
+                             "iga / de / pso / abc；不传该参数表示人类")
     parser.add_argument("--p2-ai", choices=S.VALID_AIS, default=None,
-                        help="后手（白方）算法：mcts / alphabeta / random；"
-                             "不传该参数表示人类")
+                        help="后手（白方）算法：mcts / alphabeta / random / "
+                             "iga / de / pso / abc；不传该参数表示人类")
 
     # ---- AI 搜索参数（统一最大努力预算，命令行仅作显式覆盖） ----
     parser.add_argument("--mcts-iterations", type=int, default=None,
@@ -81,6 +81,14 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Alpha-Beta 迭代加深最大深度（覆盖全局变量）")
     parser.add_argument("--ab-time", type=float, default=None,
                         help="Alpha-Beta 每步最大思考秒数（覆盖全局变量）")
+    parser.add_argument("--evo-population", type=int, default=None,
+                        help="群体优化 AI 种群规模（覆盖全局变量）")
+    parser.add_argument("--evo-generations", type=int, default=None,
+                        help="群体优化 AI 最大进化代数（覆盖全局变量）")
+    parser.add_argument("--evo-horizon", type=int, default=None,
+                        help="群体优化 AI 单个体推演步数（覆盖全局变量）")
+    parser.add_argument("--evo-time", type=float, default=None,
+                        help="群体优化 AI 每步最大思考秒数（覆盖全局变量）")
     parser.add_argument("--seed", type=int, default=None,
                         help="随机数种子，填写整数可复现随机过程")
 
@@ -122,6 +130,15 @@ def load_config(argv=None) -> Config:
         "mcts_time": S.MCTS_TIME_LIMIT,
         "ab_depth": S.AB_MAX_DEPTH,
         "ab_time": S.AB_TIME_LIMIT,
+        "evo_population": S.EVO_POPULATION,
+        "evo_generations": S.EVO_GENERATIONS,
+        "evo_horizon": S.EVO_HORIZON,
+        "evo_time": S.EVO_TIME_LIMIT,
+        "evo_elite": S.EVO_ELITE,
+        "evo_stall_limit": S.EVO_STALL_LIMIT,
+        "evo_de_f": S.EVO_DE_F,
+        "evo_de_cr": S.EVO_DE_CR,
+        "evo_abc_limit": S.EVO_ABC_LIMIT,
         "random_seed": S.RANDOM_SEED,
         "window_width": S.WINDOW_WIDTH,
         "window_height": S.WINDOW_HEIGHT,
@@ -151,6 +168,14 @@ def load_config(argv=None) -> Config:
         data["ab_depth"] = args.ab_depth
     if args.ab_time is not None:
         data["ab_time"] = args.ab_time
+    if args.evo_population is not None:
+        data["evo_population"] = args.evo_population
+    if args.evo_generations is not None:
+        data["evo_generations"] = args.evo_generations
+    if args.evo_horizon is not None:
+        data["evo_horizon"] = args.evo_horizon
+    if args.evo_time is not None:
+        data["evo_time"] = args.evo_time
     if args.seed is not None:
         data["random_seed"] = args.seed
     if args.width is not None:

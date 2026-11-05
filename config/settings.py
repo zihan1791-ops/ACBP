@@ -51,6 +51,10 @@ FIRST_PLAYER = 1
 #   'mcts'      —— 蒙特卡洛树搜索
 #   'alphabeta' —— Alpha-Beta 剪枝搜索
 #   'random'    —— 随机基线 AI（用于流程测试与算法对照）
+#   'iga'       —— 改进遗传算法（群体优化选步）
+#   'de'        —— 差分进化算法（群体优化选步）
+#   'pso'       —— 粒子群优化算法（群体优化选步）
+#   'abc'       —— 人工蜂群算法（群体优化选步）
 #   None        —— 该方为人类玩家
 # 约定：PLAYER1_AI 对应先手（黑方），PLAYER2_AI 对应后手（白方）。
 # 例如人机大战且人类先手：PLAYER1_AI = None，PLAYER2_AI = 'mcts'；
@@ -82,6 +86,35 @@ AB_TIME_LIMIT = 10.0
 RANDOM_SEED = None
 
 
+# ===================== 三之二、群体优化 AI 预算 =====================
+# 改进遗传 / 差分进化 / 粒子群 / 人工蜂群共用这组预算。
+# 个体是长度 evo_horizon 的实数向量，解码成「我走一步 + 对手应一步」的
+# 合法推演序列，适应度由局面评估（或终局胜负）给出。
+
+# 种群规模（每代个体数）
+EVO_POPULATION = 30
+
+# 最大进化代数；与 EVO_TIME_LIMIT 先到即停
+EVO_GENERATIONS = 50
+
+# 单个个体向前推演的我方步数（搜索视野）
+EVO_HORIZON = 6
+
+# 每一步最大思考秒数
+EVO_TIME_LIMIT = 8.0
+
+# 改进 GA 精英保留数量 / 停滞重启阈值
+EVO_ELITE = 2
+EVO_STALL_LIMIT = 6
+
+# 差分进化缩放因子 F / 交叉概率 CR
+EVO_DE_F = 0.6
+EVO_DE_CR = 0.85
+
+# 人工蜂群食物源放弃阈值（连续多少代未改进即重置）
+EVO_ABC_LIMIT = 5
+
+
 # ===================== 四、各棋种默认参数 =====================
 # name：界面中显示的中文名称；board_size：默认棋盘尺寸；
 # allowed_sizes：该棋种允许选择的尺寸范围（UI 主菜单 / 校验时使用）。
@@ -110,7 +143,7 @@ ACTIVE_GAMES = ['gomoku', 'othello']
 # 合法选项集合，供参数校验使用（与对外开放选项保持一致）
 VALID_GAMES = ACTIVE_GAMES
 VALID_MODES = ['human_vs_ai', 'ai_vs_ai', 'human_vs_human']
-VALID_AIS = ['mcts', 'alphabeta', 'random']
+VALID_AIS = ['mcts', 'alphabeta', 'random', 'iga', 'de', 'pso', 'abc']
 
 
 # ===================== 五、棋谱与日志 =====================

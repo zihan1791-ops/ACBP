@@ -23,6 +23,7 @@
 可用 ACBP_AI_MODE=async|sync 显式覆盖；worker 异常会自动回退同步。
 """
 
+import time
 from typing import Callable, List
 
 import pygame
@@ -78,6 +79,8 @@ class GameScene:
         self._log_y = None            # 走查用：记录棋谱标签 y，验证布局恒定
         self._ai_mode = ai_runner.default_mode()
         self._runner = None           # 全局共享的长驻 AI worker（惰性取用）
+        self._ai_submit_at = 0.0     # 当前在途任务的提交时刻（看门狗用）
+        self._ai_retry = 0           # 连续超时重试次数，超阈值回退同步
         if self._ai_mode == "async":
             ai_runner.warmup()        # 把 spawn 开销放在场景构造阶段
             self._runner = ai_runner.shared_runner()
@@ -164,6 +167,14 @@ class GameScene:
         if not self.ctrl.is_over and self.ctrl.current_is_ai:
             self.ctrl.step_ai(on_progress=self._on_ai_progress)
 
+    def _watchdog_timeout(self) -> bool:
+        """在途任务超过「最大算法预算 + 6 秒宽限」即判定为卡死。"""
+        cfg = self.ctrl.config
+        budgets = (cfg.get("mcts_time", 0.0), cfg.get("ab_time", 0.0),
+                   cfg.get("evo_time", 0.0))
+        limit = max(7.0, max(float(b or 0.0) for b in budgets) + 6.0)
+        return (time.monotonic() - self._ai_submit_at) > limit
+
     def _pump_ai(self) -> None:
         """
         非阻塞地推进一步 AI：提交任务 → 轮询进度 / 结果 → 落子。
@@ -190,6 +201,20 @@ class GameScene:
                                  self.ctrl.config.to_dict()):
                 self._fallback_sync("AI 任务提交失败，已回退同步模式")
                 return
+            self._ai_submit_at = time.monotonic()
+        elif self._ai_submit_at <= 0.0:
+            self._ai_submit_at = time.monotonic()
+        elif self._watchdog_timeout():
+            # worker 卡住但进程仍活着时原有回退条件不成立，必须主动兜底
+            self._ai_retry += 1
+            runner.cancel()              # 换干净队列，下一帧重新提交
+            self.ctrl.ai_thinking = False
+            self._ai_submit_at = 0.0
+            if self._ai_retry >= 2:
+                self._fallback_sync("AI 计算超时，已回退同步模式")
+            else:
+                self.ctrl.last_event = "AI 响应超时，正在重试"
+            return
 
         msg = runner.poll()
         if msg is None or msg[1] != runner.gen:
@@ -203,12 +228,14 @@ class GameScene:
             if think is not None:
                 self._apply_snapshot(think, msg[2])
         elif kind == "done":
+            self._ai_retry = 0
             if think is not None:
                 self._apply_snapshot(think, msg[3])
                 think.active = False
             self.ctrl.ai_thinking = False
             self.ctrl.apply_ai_move(msg[2], validate=True)
         else:                            # error
+            self._ai_retry = 0
             self.ctrl.ai_thinking = False
             self._fallback_sync("AI 计算失败，已回退同步模式")
 
@@ -217,6 +244,8 @@ class GameScene:
         if self._ai_mode == "async":
             self._get_runner().cancel()
         self.ctrl.ai_thinking = False
+        self._ai_submit_at = 0.0
+        self._ai_retry = 0
 
     def shutdown_ai(self) -> None:
         """切换 / 退出场景时作废在途任务（共享 worker 由 App 统一关闭）。"""
@@ -421,8 +450,7 @@ class GameScene:
                              (x - s(7), y + s(20)), 3)
 
         if think is not None:
-            total = (think.total or 1) if think.algo == "mcts" \
-                else (think.max_depth or 1)
+            total = think.total or think.max_depth or 1
             ratio = max(0.0, min(1.0, think.done / max(1, total)))
             best = "%s %s" % (self._fmt_move(think.best_move),
                               self._fmt_value(think))
