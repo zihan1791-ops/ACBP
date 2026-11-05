@@ -23,6 +23,7 @@
 可用 ACBP_AI_MODE=async|sync 显式覆盖；worker 异常会自动回退同步。
 """
 
+import time
 from typing import Callable, List
 
 import pygame
@@ -75,6 +76,8 @@ class GameScene:
         self._last_progress_draw = 0
         self._last_candidates: list = []
         self._last_move_count = -1
+        self._ai_submit_at = 0.0       # 当前 AI 任务的提交时刻（看门狗计时）
+        self._ai_timeouts = 0          # 连续超时次数，超过阈值永久回退同步
         self._log_y = None            # 走查用：记录棋谱标签 y，验证布局恒定
         self._ai_mode = ai_runner.default_mode()
         self._runner = None           # 全局共享的长驻 AI worker（惰性取用）
@@ -160,6 +163,7 @@ class GameScene:
         """worker 不可用时退回原来的同步路径，保证对局不中断。"""
         self._ai_mode = "sync"
         self.ctrl.last_event = reason
+        self._ai_submit_at = 0.0
         self._get_runner().cancel()
         if not self.ctrl.is_over and self.ctrl.current_is_ai:
             self.ctrl.step_ai(on_progress=self._on_ai_progress)
@@ -178,6 +182,26 @@ class GameScene:
             self._fallback_sync("AI 进程不可用，已回退同步模式")
             return
 
+        # 看门狗：任务提交后若远超搜索预算仍无结果（进程僵死 / 消息丢失），
+        # 主动作废并重试；连续两次异常则永久回退同步，绝不让 AI 回合卡死。
+        if runner.busy and self._ai_submit_at:
+            budget = max(float(self.ctrl.config.get("mcts_time", 10.0)),
+                         float(self.ctrl.config.get("ab_time", 10.0)))
+            limit = max(8.0, budget + 6.0)
+            if time.monotonic() - self._ai_submit_at > limit:
+                self._ai_timeouts += 1
+                runner.cancel()            # 终止僵死 worker 并重建干净队列
+                self._ai_submit_at = 0.0
+                self.ctrl.ai_thinking = False
+                if self._ai_timeouts >= 2:
+                    self._ai_mode = "sync"
+                    self.ctrl.last_event = "AI 进程无响应，已回退同步模式"
+                    if not self.ctrl.is_over and self.ctrl.current_is_ai:
+                        self.ctrl.step_ai(on_progress=self._on_ai_progress)
+                    return
+                self.ctrl.last_event = "AI 计算超时，正在重试"
+                return                 # 下一帧重新提交同一步
+
         if not runner.busy:
             player = self.ctrl.current_player
             ai = player.ai
@@ -190,6 +214,7 @@ class GameScene:
                                  self.ctrl.config.to_dict()):
                 self._fallback_sync("AI 任务提交失败，已回退同步模式")
                 return
+            self._ai_submit_at = time.monotonic()
 
         msg = runner.poll()
         if msg is None or msg[1] != runner.gen:
@@ -207,15 +232,19 @@ class GameScene:
                 self._apply_snapshot(think, msg[3])
                 think.active = False
             self.ctrl.ai_thinking = False
+            self._ai_submit_at = 0.0
+            self._ai_timeouts = 0
             self.ctrl.apply_ai_move(msg[2], validate=True)
         else:                            # error
             self.ctrl.ai_thinking = False
+            self._ai_submit_at = 0.0
             self._fallback_sync("AI 计算失败，已回退同步模式")
 
     def _cancel_pending(self) -> None:
         """悔棋 / 重开时作废在途任务，避免旧局面的走子落到新棋盘。"""
         if self._ai_mode == "async":
             self._get_runner().cancel()
+        self._ai_submit_at = 0.0
         self.ctrl.ai_thinking = False
 
     def shutdown_ai(self) -> None:

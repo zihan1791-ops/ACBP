@@ -6,5 +6,6 @@ __pycache__/
 # IDE
 .idea/
 
-# 本地用户数据（不入库：棋谱归档）
+# 本地用户数据（不入库：棋谱归档、外观偏好）
 records/
+user_prefs.json

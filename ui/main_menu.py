@@ -11,6 +11,9 @@
 点击目标 42→52；删除破格刊号、栏目英文副名与副刊名等装饰文案，
 只在左栏保留「当前设定」摘要这类有信息量的内容；模式切换给出一行
 简短反馈，解释为什么双方身份被自动归一化。
+
+外观入口：右下新增「外观设置」按钮（回调由 App 注入）；App 会在离开
+主菜单前保存 current_options() 快照，返回时用 initial_options 恢复。
 """
 
 from typing import Callable, Optional, Dict, List, Tuple
@@ -37,16 +40,21 @@ class MainMenu:
     }
 
     def __init__(self, cfg, on_start: Callable[[dict], None],
-                 on_replay: Optional[Callable[[], None]] = None) -> None:
+                 on_replay: Optional[Callable[[], None]] = None,
+                 on_settings: Optional[Callable[[], None]] = None,
+                 initial_options: Optional[dict] = None) -> None:
         self.cfg = cfg
         self.on_start = on_start
         self.on_replay = on_replay
+        self.on_settings = on_settings
 
-        self.game_kind: str = cfg.game or "gomoku"
-        self.mode: str = cfg.mode or "human_vs_ai"
-        self.p1_ai: Optional[str] = cfg.p1_ai
-        self.p2_ai: Optional[str] = cfg.p2_ai
-        self.board_size: Optional[int] = cfg.board_size
+        # 从设置页 / 对局返回时恢复上次开局设定；未指定则沿用 cfg 默认值
+        opts = initial_options or {}
+        self.game_kind: str = opts.get("game_kind", cfg.game or "gomoku")
+        self.mode: str = opts.get("mode", cfg.mode or "human_vs_ai")
+        self.p1_ai: Optional[str] = opts.get("p1_ai", cfg.p1_ai)
+        self.p2_ai: Optional[str] = opts.get("p2_ai", cfg.p2_ai)
+        self.board_size: Optional[int] = opts.get("board_size", cfg.board_size)
 
         self.buttons: List[Button] = []
         self._rows: List[dict] = []
@@ -117,6 +125,13 @@ class MainMenu:
             self._option_row(y, 0, label, options, current, on_select,
                              row_no=i + 1)
 
+        if self.on_settings is not None:
+            settings = Button((s(360), s(780), s(240), s(60)), "外观设置",
+                              on_click=self.on_settings,
+                              font_size=theme.FONT_BODY)
+            settings.reveal_delay = 470
+            self.buttons.append(settings)
+
         start = Button((s(744), s(780), s(280), s(60)), "开始对局",
                        on_click=self._start, accent=True,
                        font_size=theme.FONT_HEAD)
@@ -169,15 +184,19 @@ class MainMenu:
             self.notice = ""
         self._build_layout()
 
-    def _start(self) -> None:
-        """把菜单选择打包后回调给 App（dict 的 5 个键是硬契约）。"""
-        self.on_start({
+    def current_options(self) -> dict:
+        """当前开局设定的快照（dict 的 5 个键是硬契约）。"""
+        return {
             "game_kind": self.game_kind,
             "mode": self.mode,
             "p1_ai": self.p1_ai,
             "p2_ai": self.p2_ai,
             "board_size": self.board_size,
-        })
+        }
+
+    def _start(self) -> None:
+        """把菜单选择打包后回调给 App。"""
+        self.on_start(self.current_options())
 
     # ===================== 事件与更新 =====================
 

@@ -97,7 +97,11 @@ class AiRunner:
 
     def _ensure_started(self) -> bool:
         if self._started:
-            return True
+            # worker 意外退出（被外部终止 / 崩溃）时不能复用旧队列，
+            # 否则新进程会永远阻塞在 task_q.get()，表现为 AI 回合卡住。
+            if self._proc is not None and self._proc.is_alive():
+                return True
+            self.cancel(rebuild=True)
         try:
             self._proc = self._ctx.Process(
                 target=_worker, args=(self._task_q, self._result_q),
@@ -142,13 +146,25 @@ class AiRunner:
                 break
             except Exception:
                 break
+            if msg[0] in ("done", "error"):
+                # 终态消息立即返回，绝不能被同批次里稍晚的 progress 覆盖
+                self.busy = False
+                return msg
+            if not self.busy:
+                # 任务已结束才姗姗来迟的旧进度，直接丢弃
+                continue
             latest = msg
-        if latest is not None and latest[0] in ("done", "error"):
-            self.busy = False
         return latest
 
-    def cancel(self) -> None:
-        """悔棋 / 重开：终止 worker 并递增 gen，使在途结果全部作废。"""
+    def cancel(self, rebuild: bool = True) -> None:
+        """
+        悔棋 / 重开 / 场景切换：终止 worker 并递增 gen，使在途结果全部作废。
+
+        terminate() 强杀 worker 后，multiprocessing.Queue 的内部信号量可能
+        残留被杀进程的计数，复用同一对队列会让**新 worker 永久阻塞在
+        task_q.get()**——这正是「从对局返回主菜单再开一局，轮到 AI 就卡住」
+        的原因。因此默认重建一对干净的 Queue，新进程一定拿得到任务。
+        """
         self.gen += 1
         self.busy = False
         self._drain(self._result_q)
@@ -162,6 +178,15 @@ class AiRunner:
                 pass
         self._proc = None
         self._started = False
+        if rebuild:
+            try:
+                self._task_q.close()
+                self._result_q.close()
+            except Exception:
+                pass
+            self._task_q = self._ctx.Queue()
+            self._result_q = self._ctx.Queue()
+            self.failed = False
 
     @staticmethod
     def _drain(queue) -> None:
@@ -178,7 +203,12 @@ class AiRunner:
                 self._task_q.put(None)
         except Exception:
             pass
-        self.cancel()
+        self.cancel(rebuild=False)
+        try:
+            self._task_q.close()
+            self._result_q.close()
+        except Exception:
+            pass
 
 
 # ===========================================================================

@@ -5,6 +5,7 @@ pygame 应用主循环与场景切换器（≈ 路由表）。
 场景流转与全部跨层契约保持不变：
     MainMenu ──开始对局──► GameScene ──返回──► MainMenu
     MainMenu ──棋谱回放──► ReplayScene ──续局──► GameScene
+    MainMenu ──外观设置──► AppearanceScene ──返回──► MainMenu
     cfg.game 与 cfg.mode 同时指定时直接开局。
     App(cfg) / run() / scene / screen / clock / controller / running 均保持。
 
@@ -16,6 +17,7 @@ import pygame
 
 from . import theme, motion, assets, ai_runner
 from .main_menu import MainMenu
+from .settings_scene import AppearanceScene
 from .game_scene import GameScene
 from .replay_scene import ReplayScene
 from game.modes import create_game, resume_game_from_record
@@ -46,6 +48,7 @@ class App:
         self.running = True
         self.controller = None
         self.scene = None
+        self._menu_options = None      # 主菜单选择快照，供设置页 / 对局返回时恢复
 
         if cfg.game and cfg.mode:
             self._start_game({
@@ -57,7 +60,8 @@ class App:
             })
         else:
             self._set_scene(MainMenu(self.cfg, self._on_menu_start,
-                                     on_replay=self._open_replay))
+                                     on_replay=self._open_replay,
+                                     on_settings=self._open_settings))
 
     # ===================== 场景切换（契约） =====================
 
@@ -69,17 +73,31 @@ class App:
 
     def _on_menu_start(self, options: dict) -> None:
         """主菜单点击「开始对局」后的回调。"""
+        self._menu_options = dict(options)
         self._start_game(options)
 
     def _open_replay(self) -> None:
         """主菜单点击「棋谱回放」后的回调。"""
+        self._remember_menu()
         self._set_scene(ReplayScene(self.cfg, self._back_to_menu,
                                     on_resume=self._resume_from_replay))
 
+    def _open_settings(self) -> None:
+        """主菜单点击「外观设置」后的回调：进入独立外观设置页。"""
+        self._remember_menu()
+        self._set_scene(AppearanceScene(self.cfg, self._back_to_menu))
+
+    def _remember_menu(self) -> None:
+        """离开主菜单前记下当前开局设定，返回时原样恢复。"""
+        if isinstance(self.scene, MainMenu):
+            self._menu_options = self.scene.current_options()
+
     def _back_to_menu(self) -> None:
-        """从对局 / 回放场景返回主菜单。"""
+        """从对局 / 回放 / 外观设置场景返回主菜单。"""
         self._set_scene(MainMenu(self.cfg, self._on_menu_start,
-                                 on_replay=self._open_replay))
+                                 on_replay=self._open_replay,
+                                 on_settings=self._open_settings,
+                                 initial_options=self._menu_options))
 
     def _resume_from_replay(self, record: dict, step: int,
                             p1_ai=None, p2_ai=None) -> None:
