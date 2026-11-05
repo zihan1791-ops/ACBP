@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pygame
 
 from config.args import load_config
+from core.base_board import BLACK
 from ui.app import App
 from ui.game_scene import GameScene
 from game.modes import create_game
@@ -79,6 +80,16 @@ def main() -> None:
     check = steps >= 1
     print("[PASS] AI 思考可视化回调渲染（on_progress 实时重绘）"
           if check else "[FAIL] AI 思考回调未触发")
+
+    # 5. 主菜单棋子外观弹层：打开、切换、渲染、关闭
+    menu = app.scene
+    menu._open_skins_modal()
+    menu._set_skin(BLACK, "violet")
+    menu.update()
+    menu.draw(app.screen)
+    pygame.display.flip()
+    menu._close_modal()
+    print("[PASS] 棋子外观弹层打开、切换、渲染与关闭")
 
     pygame.quit()
     print("\nUI SMOKE PASSED")

@@ -86,7 +86,8 @@ class GameScene:
             self._runner = ai_runner.shared_runner()
 
         board_rect = (s(36), s(96), s(800), s(690))
-        self.board_view = BoardView(board_rect, controller.board)
+        self.board_view = BoardView(board_rect, controller.board,
+                                    skins=controller.skins)
 
         panel_rect = pygame.Rect(s(864), s(96), s(540), s(752))
         self.panel = Panel(panel_rect)

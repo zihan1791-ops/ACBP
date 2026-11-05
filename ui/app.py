@@ -14,11 +14,12 @@ pygame 应用主循环与场景切换器（≈ 路由表）。
 
 import pygame
 
-from . import theme, motion, assets, ai_runner
+from . import theme, motion, assets, ai_runner, piece_skins
 from .main_menu import MainMenu
 from .game_scene import GameScene
 from .replay_scene import ReplayScene
 from game.modes import create_game, resume_game_from_record
+from config.skins import from_config as skins_from_config
 from utils.logger import log_info
 
 
@@ -27,6 +28,8 @@ class App:
 
     def __init__(self, cfg) -> None:
         self.cfg = cfg
+        # 双方棋子外观：菜单与对局共用一份，返回菜单后不会丢失选择
+        self.skins = skins_from_config(cfg)
 
         # 先按实际窗口尺寸重算画布缩放与全部字号/间距令牌，再创建窗口
         theme.set_canvas(cfg)
@@ -37,6 +40,7 @@ class App:
         pygame.display.set_caption("ACBP · 棋类综合对战平台")
         w, h = theme.window_size(cfg)
         self.screen = pygame.display.set_mode((w, h))
+        piece_skins.preload(self.skins.values())
         self.clock = pygame.time.Clock()
 
         theme.qa_report(cfg)
@@ -54,10 +58,13 @@ class App:
                 "p1_ai": cfg.p1_ai,
                 "p2_ai": cfg.p2_ai,
                 "board_size": cfg.board_size,
+                "skins": dict(self.skins),
             })
         else:
             self._set_scene(MainMenu(self.cfg, self._on_menu_start,
-                                     on_replay=self._open_replay))
+                                     on_replay=self._open_replay,
+                                     skins=self.skins,
+                                     on_skins_change=self._set_skins))
 
     # ===================== 场景切换（契约） =====================
 
@@ -69,7 +76,14 @@ class App:
 
     def _on_menu_start(self, options: dict) -> None:
         """主菜单点击「开始对局」后的回调。"""
+        if options.get("skins"):
+            self._set_skins(options["skins"])
         self._start_game(options)
+
+    def _set_skins(self, skins: dict) -> None:
+        """记住主菜单里选择的棋子外观，供后续开局与返回菜单复用。"""
+        self.skins = dict(skins or self.skins)
+        piece_skins.preload(self.skins.values())
 
     def _open_replay(self) -> None:
         """主菜单点击「棋谱回放」后的回调。"""
@@ -79,7 +93,9 @@ class App:
     def _back_to_menu(self) -> None:
         """从对局 / 回放场景返回主菜单。"""
         self._set_scene(MainMenu(self.cfg, self._on_menu_start,
-                                 on_replay=self._open_replay))
+                                 on_replay=self._open_replay,
+                                 skins=self.skins,
+                                 on_skins_change=self._set_skins))
 
     def _resume_from_replay(self, record: dict, step: int,
                             p1_ai=None, p2_ai=None) -> None:
@@ -100,6 +116,7 @@ class App:
             p2_ai_name=options.get("p2_ai"),
             config=self.cfg,
             board_size=options.get("board_size"),
+            skins=options.get("skins") or self.skins,
         )
         self._set_scene(GameScene(self.controller, self._back_to_menu))
         log_info("新对局开始：%s / %s，棋盘 %s 路"

@@ -24,10 +24,11 @@ from . import theme, motion, assets, atmosphere
 from .board_view import BoardView
 from .widgets import (Button, Panel, blit_reveal, keyboard_nav,
                       build_segment_indicator, draw_segment_indicator)
-from core.base_board import BLACK
+from core.base_board import BLACK, WHITE
 from core.gomoku.board import GomokuBoard
 from core.othello.board import OthelloBoard
 from config import GAME_DEFAULTS
+from config.skins import from_record, label as skin_label
 from utils.paths import resolve_path
 
 _PAGE_SIZE = 7
@@ -181,7 +182,8 @@ class ReplayScene:
             self.board = GomokuBoard(size)
 
         s = self.s
-        self.board_view = BoardView((s(36), s(96), s(800), s(690)), self.board)
+        self.board_view = BoardView((s(36), s(96), s(800), s(690)), self.board,
+                                    skins=from_record(data))
         panel_x = s(864)
         self.panel = Panel(pygame.Rect(panel_x, s(96), s(540), s(752)))
         self._build_play_buttons(panel_x, s(1404))
@@ -493,6 +495,14 @@ class ReplayScene:
                              (s(430), y + s(72)), (s(1380), y + s(72)))
 
         draw_segment_indicator(surface, self._indicators)
+
+        skins = from_record(self.record)
+        note = assets.mixed(
+            s(17),
+            "外观沿用棋谱：黑 %s / 白 %s" % (skin_label(skins[BLACK]),
+                                             skin_label(skins[WHITE])),
+            theme.INK_SOFT)
+        surface.blit(note, (s(430), s(470)))
 
     def _draw_play(self, surface: pygame.Surface) -> None:
         if self.board_view is not None:

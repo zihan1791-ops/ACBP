@@ -10,21 +10,25 @@ from typing import Optional
 
 from core.base_board import BLACK
 from ai.base_ai import BaseAI
+from config.skins import normalize
 
 
 class Player:
     """对局玩家（人类或 AI）。"""
 
-    def __init__(self, player_id: int, name: str, ai: Optional[BaseAI] = None) -> None:
+    def __init__(self, player_id: int, name: str, ai: Optional[BaseAI] = None,
+                 skin: Optional[str] = None) -> None:
         """
         参数：
             player_id: 玩家编号（BLACK=1 黑方 / WHITE=2 白方）；
             name:      界面显示名称；
-            ai:        AI 实例；None 表示人类玩家。
+            ai:        AI 实例；None 表示人类玩家；
+            skin:      棋子外观标识；None 或非法值按玩家编号取默认外观。
         """
         self.player_id = player_id
         self.name = name
         self.ai = ai
+        self.skin = normalize(skin, player_id)
 
     @property
     def is_human(self) -> bool:

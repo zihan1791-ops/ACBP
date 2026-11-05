@@ -18,9 +18,12 @@ from typing import Callable, Optional, Dict, List, Tuple
 import pygame
 
 from . import theme, motion, assets, atmosphere
-from .widgets import (Button, blit_reveal, keyboard_nav,
+from .widgets import (Button, Panel, blit_reveal, keyboard_nav,
                       build_segment_indicator, draw_segment_indicator)
 from config import GAME_DEFAULTS, VALID_GAMES, VALID_MODES, VALID_AIS
+from config.skins import (SKIN_ORDER, SKIN_LABELS, from_config,
+                          normalize, label as skin_label)
+from core.base_board import BLACK, WHITE
 
 
 class MainMenu:
@@ -39,10 +42,19 @@ class MainMenu:
     }
 
     def __init__(self, cfg, on_start: Callable[[dict], None],
-                 on_replay: Optional[Callable[[], None]] = None) -> None:
+                 on_replay: Optional[Callable[[], None]] = None,
+                 skins: Optional[dict] = None,
+                 on_skins_change: Optional[Callable[[dict], None]] = None) -> None:
         self.cfg = cfg
         self.on_start = on_start
         self.on_replay = on_replay
+        self.on_skins_change = on_skins_change
+
+        base_skins = dict(skins or from_config(cfg))
+        self.skins = {
+            BLACK: normalize(base_skins.get(BLACK), BLACK),
+            WHITE: normalize(base_skins.get(WHITE), WHITE),
+        }
 
         self.game_kind: str = cfg.game or "gomoku"
         self.mode: str = cfg.mode or "human_vs_ai"
@@ -57,6 +69,15 @@ class MainMenu:
         self.kb_index = 0
         self.kb_mode = False
         self.born = motion.now()
+
+        # 棋子外观弹层：只在打开时接管鼠标与键盘焦点
+        self.modal: Optional[str] = None
+        self.modal_buttons: List[Button] = []
+        self.modal_index = 0
+        self.modal_born = 0
+        self.modal_panel: Optional[pygame.Rect] = None
+        self._kb_before_modal = 0
+        self.skin_button: Optional[Button] = None
 
         self._normalize_for_mode()
         self._build_layout()
@@ -132,6 +153,16 @@ class MainMenu:
                             font_size=theme.FONT_BODY)
             replay.reveal_delay = 580
             self.buttons.append(replay)
+
+        # 左栏底部：棋子外观入口；打开弹层后不重建整个菜单
+        self.skin_button = Button(
+            (s(56), s(790), s(320), s(48)),
+            "棋子外观 · %s / %s" % (skin_label(self.skins[BLACK]),
+                                    skin_label(self.skins[WHITE])),
+            on_click=self._open_skins_modal,
+            font_size=theme.FONT_BODY)
+        self.skin_button.reveal_delay = 640
+        self.buttons.append(self.skin_button)
 
         self.kb_index = min(self.kb_index, max(0, len(self.buttons) - 1))
 
@@ -226,11 +257,139 @@ class MainMenu:
             "p1_ai": self.p1_ai,
             "p2_ai": self.p2_ai,
             "board_size": self.board_size,
+            "skins": dict(self.skins),
         })
+
+    # ===================== 棋子外观弹层 =====================
+
+    def _skin_summary(self) -> str:
+        """入口按钮上的当前外观摘要。"""
+        return "棋子外观 · %s / %s" % (skin_label(self.skins[BLACK]),
+                                       skin_label(self.skins[WHITE]))
+
+    def _open_skins_modal(self) -> None:
+        """打开黑 / 白双方的外观选择弹层。"""
+        self.modal = "skins"
+        self.modal_born = motion.now()
+        self._kb_before_modal = self.kb_index
+        self.kb_mode = True
+        self.modal_index = 0
+        self._build_modal()
+
+    def _close_modal(self) -> None:
+        """关闭弹层并把焦点还给主菜单。"""
+        self.modal = None
+        self.modal_buttons = []
+        self.modal_panel = None
+        self.kb_mode = False
+        self.kb_index = self._kb_before_modal
+        if self.skin_button is not None:
+            self.skin_button.text = self._skin_summary()
+
+    def _build_modal(self) -> None:
+        """构建弹层面板与两行四选一按钮（不触碰主菜单布局）。"""
+        s = theme.S
+        w, h = theme.window_size(self.cfg)
+        panel_w, panel_h = s(820), s(430)
+        self.modal_panel = pygame.Rect((w - panel_w) // 2,
+                                       (h - panel_h) // 2,
+                                       panel_w, panel_h)
+        self.modal_buttons = []
+
+        btn_w, btn_h, gap = s(150), s(52), s(12)
+        for row, (player_id, _row_label) in enumerate(
+                ((BLACK, "黑方 · 先手"), (WHITE, "白方 · 后手"))):
+            y = self.modal_panel.y + s(110) + row * s(100)
+            for i, skin in enumerate(SKIN_ORDER):
+                x = self.modal_panel.x + s(150) + i * (btn_w + gap)
+                btn = Button(
+                    (x, y, btn_w, btn_h), SKIN_LABELS[skin],
+                    on_click=lambda pid=player_id, sk=skin: self._set_skin(pid, sk),
+                    selected=(self.skins[player_id] == skin),
+                    font_size=theme.FONT_BODY)
+                btn.reveal_delay = 40 + row * 60 + i * 30
+                self.modal_buttons.append(btn)
+
+        done = Button((self.modal_panel.centerx - s(70),
+                       self.modal_panel.bottom - s(86), s(140), s(52)),
+                      "完成", on_click=self._close_modal, accent=True,
+                      font_size=theme.FONT_BODY)
+        done.reveal_delay = 220
+        self.modal_buttons.append(done)
+        self.modal_index = min(self.modal_index,
+                               max(0, len(self.modal_buttons) - 1))
+
+    def _set_skin(self, player_id: int, skin: str) -> None:
+        """切换某一方的外观并通知 App；只重建弹层按钮，不重建主菜单。"""
+        self.skins[player_id] = normalize(skin, player_id)
+        if self.on_skins_change is not None:
+            self.on_skins_change(dict(self.skins))
+        if self.skin_button is not None:
+            self.skin_button.text = self._skin_summary()
+        self._build_modal()
+
+    def _handle_modal_event(self, event: pygame.event.Event) -> None:
+        """弹层打开时的事件入口：屏蔽主菜单，只操作弹层按钮。"""
+        if event.type == pygame.MOUSEMOTION:
+            self.kb_mode = False
+        elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            self._close_modal()
+            return
+        elif event.type == pygame.KEYDOWN and event.key in (
+                pygame.K_TAB, pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT,
+                pygame.K_RIGHT, pygame.K_RETURN, pygame.K_KP_ENTER,
+                pygame.K_SPACE):
+            self.kb_mode = True
+            self.modal_index = keyboard_nav(self.modal_buttons, event,
+                                            self.modal_index)
+            if self.modal:
+                self.modal_index = min(self.modal_index,
+                                       max(0, len(self.modal_buttons) - 1))
+            return
+
+        if (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1
+                and self.modal_panel is not None
+                and not self.modal_panel.collidepoint(event.pos)):
+            self._close_modal()
+            return
+        for btn in self.modal_buttons:
+            btn.handle_event(event)
+
+    def _draw_modal(self, surface: pygame.Surface) -> None:
+        """遮罩 + 宣纸面板 + 黑/白两行四选一按钮。"""
+        s = theme.S
+        w, h = theme.window_size(self.cfg)
+        veil = pygame.Surface((w, h), pygame.SRCALPHA)
+        veil.fill((*theme.INK, 110))
+        surface.blit(veil, (0, 0))
+
+        if self.modal_panel is None:
+            return
+        panel = Panel(self.modal_panel)
+        panel.draw(surface)
+        atmosphere.section_label(surface, "棋子外观",
+                                 panel.rect.x + s(26), panel.rect.y + s(22))
+        hint = assets.mixed(s(15), "选择会记住，开局时生效 · 点击遮罩或 Esc 关闭",
+                            theme.INK_SOFT)
+        surface.blit(hint, (panel.rect.x + s(26), panel.rect.y + s(62)))
+
+        for row, title in enumerate(("黑方 · 先手", "白方 · 后手")):
+            y = panel.rect.y + s(110) + row * s(100)
+            glyph = assets.mixed(s(18), title, theme.INK)
+            surface.blit(glyph, (panel.rect.x + s(28), y + s(14)))
+
+        for btn in self.modal_buttons:
+            btn.reveal = motion.reveal(
+                self.modal_born, getattr(btn, "reveal_delay", 0),
+                theme.MOTION["base"])
+            btn.draw(surface)
 
     # ===================== 事件与更新 =====================
 
     def handle_event(self, event: pygame.event.Event) -> None:
+        if self.modal:
+            self._handle_modal_event(event)
+            return
         if event.type == pygame.MOUSEMOTION:
             self.kb_mode = False
         elif event.type == pygame.KEYDOWN and event.key in (
@@ -246,6 +405,13 @@ class MainMenu:
 
     def update(self) -> None:
         mouse_pos = pygame.mouse.get_pos()
+        if self.modal:
+            self.modal_index = min(self.modal_index,
+                                   max(0, len(self.modal_buttons) - 1))
+            for i, btn in enumerate(self.modal_buttons):
+                btn.update(mouse_pos)
+                btn.focused = self.kb_mode and i == self.modal_index
+            return
         self.kb_index = min(self.kb_index, max(0, len(self.buttons) - 1))
         for i, btn in enumerate(self.buttons):
             btn.update(mouse_pos)
@@ -323,3 +489,6 @@ class MainMenu:
         keys = assets.mixed(s(15), "Tab 选择 · Enter 确认 · R 关闭动效",
                             theme.INK_SOFT)
         blit_reveal(surface, keys, (s(36), s(866)), pf, 8)
+
+        if self.modal:
+            self._draw_modal(surface)

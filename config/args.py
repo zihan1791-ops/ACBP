@@ -14,6 +14,7 @@ import argparse
 import random
 
 from . import settings as S
+from .skins import SKIN_IDS
 from utils.logger import log_warn
 
 
@@ -72,6 +73,12 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="后手（白方）算法：mcts / alphabeta / random / "
                              "iga / de / pso / abc；不传该参数表示人类")
 
+    # ---- 双方棋子外观（可选覆盖，默认取 settings.P1_SKIN / P2_SKIN） ----
+    parser.add_argument("--p1-skin", choices=SKIN_IDS, default=None,
+                        help="先手（黑方）棋子外观：classic / ember / azure / violet")
+    parser.add_argument("--p2-skin", choices=SKIN_IDS, default=None,
+                        help="后手（白方）棋子外观：classic / ember / azure / violet")
+
     # ---- AI 搜索参数（统一最大努力预算，命令行仅作显式覆盖） ----
     parser.add_argument("--mcts-iterations", type=int, default=None,
                         help="MCTS 每步最大迭代次数（覆盖全局变量）")
@@ -125,6 +132,8 @@ def load_config(argv=None) -> Config:
         "first_player": S.FIRST_PLAYER,
         "p1_ai": S.PLAYER1_AI,
         "p2_ai": S.PLAYER2_AI,
+        "p1_skin": S.P1_SKIN,
+        "p2_skin": S.P2_SKIN,
         "board_size": S.BOARD_SIZE,
         "mcts_iterations": S.MCTS_ITERATIONS,
         "mcts_time": S.MCTS_TIME_LIMIT,
@@ -160,6 +169,10 @@ def load_config(argv=None) -> Config:
         data["p1_ai"] = args.p1_ai
     if args.p2_ai is not None:
         data["p2_ai"] = args.p2_ai
+    if args.p1_skin is not None:
+        data["p1_skin"] = args.p1_skin
+    if args.p2_skin is not None:
+        data["p2_skin"] = args.p2_skin
     if args.mcts_iterations is not None:
         data["mcts_iterations"] = args.mcts_iterations
     if args.mcts_time is not None:

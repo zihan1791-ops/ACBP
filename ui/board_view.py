@@ -16,19 +16,25 @@
 import pygame
 from typing import Optional, Tuple
 
-from . import theme, assets, atmosphere
+from . import theme, assets, atmosphere, piece_skins
 from core.base_board import EMPTY, BLACK
 
 
 class BoardView:
     """单块棋盘的绘制与坐标换算组件。"""
 
-    def __init__(self, rect, board) -> None:
+    def __init__(self, rect, board, skins=None) -> None:
         self.rect = pygame.Rect(rect)
         self.board = board
+        self.skins = {}
+        self.set_skins(skins)
         self._coord_key = None
         self._coord_items = []
         self._layout()
+
+    def set_skins(self, skins=None) -> None:
+        """更新双方棋子外观映射（键为 BLACK / WHITE）。"""
+        self.skins = dict(skins or {})
 
     # ===================== 布局计算（契约，逻辑不变） =====================
 
@@ -183,7 +189,7 @@ class BoardView:
 
     def _draw_stone(self, surface: pygame.Surface,
                     row: int, col: int, piece: int) -> None:
-        """棋子：极淡落子投影 + 实墨 / 纸白圆 + 细描边，去掉塑料高光。"""
+        """棋子：有头像时整颗贴 PNG，classic 或缺图时画纯色棋子。"""
         x, y = self.cell_center(row, col)
         radius = int(self.cell * 0.42)
         off = max(theme.S(2), int(self.cell * 0.045))
@@ -191,12 +197,24 @@ class BoardView:
                            (int(x + off), int(y + off)), radius)
 
         black = piece == BLACK
-        pygame.draw.circle(surface,
-                           theme.BLACK_STONE if black else theme.WHITE_STONE,
-                           (int(x), int(y)), radius)
-        pygame.draw.circle(surface,
-                           theme.STONE_HIGHLIGHT if black else theme.RULE,
-                           (int(x), int(y)), radius, 1)
+        cx, cy = int(x), int(y)
+        skin = self.skins.get(piece)
+
+        # 整图版：棋子就是这张 PNG，铺满直径，不加底色也不加描边
+        face_size = max(8, 2 * radius)
+        face = piece_skins.face(skin, face_size) if skin else None
+
+        if face is None:
+            pygame.draw.circle(surface,
+                               theme.BLACK_STONE if black else theme.WHITE_STONE,
+                               (cx, cy), radius)
+            pygame.draw.circle(surface,
+                               theme.STONE_HIGHLIGHT if black else theme.RULE,
+                               (cx, cy), radius, 1)
+            return
+
+        # 圆形裁切已在 ui/piece_skins 完成，这里直接贴图
+        surface.blit(face, face.get_rect(center=(cx, cy)))
 
     def _draw_last_move(self, surface: pygame.Surface) -> None:
         """最后一手用朱砂四角括号定位，而不是盖住棋子的圆环。"""
@@ -206,8 +224,11 @@ class BoardView:
         x, y = self.cell_center(r, c)
         side = int(self.cell * 0.74)
         box = pygame.Rect(int(x - side / 2), int(y - side / 2), side, side)
-        atmosphere.brackets(surface, box, theme.CINNABAR,
-                            max(4, int(self.cell * 0.12)), 2)
+        length = max(4, int(self.cell * 0.12))
+        # 先铺一圈纸白粗括号做外描边，再压朱砂细括号；在深发色上仍可辨认
+        atmosphere.brackets(surface, box.inflate(theme.S(2), theme.S(2)),
+                            theme.PAPER, length, 4)
+        atmosphere.brackets(surface, box, theme.CINNABAR, length, 2)
 
     def draw_candidate_marks(self, surface: pygame.Surface, top_moves) -> None:
         """

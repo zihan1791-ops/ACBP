@@ -18,6 +18,9 @@
 =====================================================================
 """
 
+from .skins import DEFAULT_SKINS
+
+
 # ===================== 一、窗口与显示 =====================
 
 # 主窗口逻辑宽 / 高（ui/theme.py 会按系统 DPI 系数换算为物理像素）
@@ -67,6 +70,11 @@ PLAYER2_AI = None
 #   其它整数 —— 显式指定，须落在该棋种允许范围内
 BOARD_SIZE = None
 
+# 双方默认棋子外观（可在主菜单里分别更换）：
+#   'classic' 经典纯色 / 'ember' 橙发 / 'azure' 蓝发 / 'violet' 紫发
+P1_SKIN = DEFAULT_SKINS[1]
+P2_SKIN = DEFAULT_SKINS[2]
+
 
 # ===================== 三、AI 最大努力预算（统一，不分难度） =====================
 
@@ -92,16 +100,16 @@ RANDOM_SEED = None
 # 合法推演序列，适应度由局面评估（或终局胜负）给出。
 
 # 种群规模（每代个体数）
-EVO_POPULATION = 30
+EVO_POPULATION = 50
 
 # 最大进化代数；与 EVO_TIME_LIMIT 先到即停
-EVO_GENERATIONS = 50
+EVO_GENERATIONS = 500
 
 # 单个个体向前推演的我方步数（搜索视野）
 EVO_HORIZON = 6
 
 # 每一步最大思考秒数
-EVO_TIME_LIMIT = 8.0
+EVO_TIME_LIMIT = 20.0
 
 # 改进 GA 精英保留数量 / 停滞重启阈值
 EVO_ELITE = 2

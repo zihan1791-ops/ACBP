@@ -53,6 +53,7 @@ python start.py
 | `PLAYER1_AI` | 黑方算法 | `'mcts'` / `'alphabeta'` / `'random'` / `'iga'` / `'de'` / `'pso'` / `'abc'`；`None` 表示人类 |
 | `PLAYER2_AI` | 白方算法 | 同上；`None` 表示人类 |
 | `BOARD_SIZE` | 棋盘尺寸 | `None` 取棋种默认；五子棋 9/11/13/15，黑白棋 8 |
+| `P1_SKIN` / `P2_SKIN` | 黑 / 白方棋子外观 | `'classic'` / `'ember'` / `'azure'` / `'violet'`；默认橙发 / 蓝发 |
 | `MCTS_ITERATIONS` | MCTS 每步迭代上限 | 整数（默认 5000） |
 | `MCTS_TIME_LIMIT` | MCTS 每步思考秒数 | 浮点秒（默认 10.0，与迭代上限先到即停） |
 | `AB_MAX_DEPTH` | Alpha-Beta 搜索深度 | 整数（默认 10） |
@@ -88,6 +89,7 @@ python start.py --game othello --mode ai_vs_ai --p1-ai alphabeta --p2-ai mcts --
 | `--p1-ai` | `PLAYER1_AI` | 黑方算法 |
 | `--p2-ai` | `PLAYER2_AI` | 白方算法 |
 | `--board-size` | `BOARD_SIZE` | 棋盘尺寸 |
+| `--p1-skin` / `--p2-skin` | `P1_SKIN` / `P2_SKIN` | 黑 / 白方棋子外观 |
 | `--mcts-iterations` | `MCTS_ITERATIONS` | MCTS 迭代上限 |
 | `--mcts-time` | `MCTS_TIME_LIMIT` | MCTS 思考秒数 |
 | `--ab-depth` | `AB_MAX_DEPTH` | Alpha-Beta 深度 |
@@ -117,6 +119,7 @@ hw-1/
 │
 ├── config/                          # 配置层：全局参数 + 命令行合并
 │   ├── settings.py                  # PyCharm 调参入口（大写全局变量，无难度档位）
+│   ├── skins.py                     # 棋子外观注册表（标识、默认值、旧棋谱回退）
 │   └── args.py                     # argparse 参数解析与优先级合并
 │
 ├── core/                            # 规则层（纯逻辑，不依赖 pygame）
@@ -151,6 +154,8 @@ hw-1/
 │   ├── atmosphere.py                # 纸纹背景、统一刊头、发丝规则线（静态缓存）
 │   ├── ai_runner.py                 # 长驻 AI worker：多进程调度、进度队列、失败回退
 │   ├── assets.py                    # 三套字体配对、中英混排、竖排文字与字距
+│   ├── piece_skins.py               # 棋子头像加载、圆形裁切与尺寸缓存（缺图回退纯色）
+│   ├── images/pieces/               # 棋子头像素材（ember / azure / violet，可替换）
 │   ├── board_view.py                # 棋盘网格、等宽坐标、棋子绘制、坐标换算、候选高亮
 │   ├── widgets.py                   # 按钮、面板、进度条、数据行、键盘导航
 │   ├── main_menu.py                 # 开局主菜单（棋种/模式/算法/棋盘尺寸 + 回放入口）
@@ -403,6 +408,29 @@ records/
 - **棋谱回放**：主菜单点击「棋谱回放」，选一局棋谱后可用 `←`/`→` 单步或
   空格自动播放，`Esc` 返回列表；点「从这继续对局」可重新指定双方角色（含 AI 介入）续弈。
 - **返回主菜单**：退出当前对局，重新选择棋种与模式。
+
+### 3. 棋子外观
+
+- **四套外观**：`经典`（纯色棋子，无头像）、`橙发`、`蓝发`、`紫发`。
+  新对局默认黑方橙发、白方蓝发；主菜单左下角「棋子外观」打开弹层，
+  黑 / 白两方各自四选一，当前选中项朱砂高亮。选择在本次运行期间保留，
+  返回主菜单或重开对局都不丢失；重启程序回到默认（或命令行指定值）。
+- **绘制方式**：有人物头像时，整颗棋子就是这张 PNG——按直径铺满并做圆形
+  裁切，不再叠加底色或描边；素材自带的圆环与透明边会原样保留。
+  9 路与黑白棋会按格距自动放大。最后一手仍用朱砂四角括号标出，并在外侧
+  加一圈纸白描边，保证在浅色头发上也能看清。
+  `经典` 外观走原纯色绘制，不影响旧棋谱的观感。
+- **棋谱记录**：每局保存 `players.black.skin` / `players.white.skin`（人类与 AI
+  都写）。回放按棋谱还原当时外观；旧棋谱没有该字段时统一按 `经典` 回放，
+  续局设置页会显示「外观沿用棋谱」。
+- **命令行**：`--p1-skin ember --p2-skin azure`，可选
+  `classic` / `ember` / `azure` / `violet`；不传时用 `config/settings.py`
+  中的 `P1_SKIN` / `P2_SKIN`。
+- **替换素材**：头像放在 `ui/images/pieces/`，文件名为
+  `ember.png` / `azure.png` / `violet.png`。仓库内置三张 1254×1254 透明 PNG，
+  会按短边居中裁切并做圆形遮罩；换成自己的图时保持文件名不变即可，
+  建议正方形、人物主体居中。缺图或读取失败时自动回退纯色棋子，
+  不会中断对局。
 
 ---
 

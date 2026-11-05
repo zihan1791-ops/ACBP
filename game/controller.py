@@ -30,6 +30,8 @@ class GameController:
         self.board = board
         # 玩家字典：键为玩家编号（BLACK / WHITE）
         self.players = {BLACK: player1, WHITE: player2}
+        # 双方棋子外观：供棋盘视图与棋谱保存共用
+        self.skins = {BLACK: player1.skin, WHITE: player2.skin}
         self.config = config
         self.game_kind = game_kind
         self.board_size = board_size
@@ -230,10 +232,10 @@ class GameController:
     # ===================== 棋谱保存 =====================
 
     def _player_role(self, player: Player) -> dict:
-        """把玩家对象序列化为棋谱中的角色信息。"""
+        """把玩家对象序列化为棋谱中的角色信息（含棋子外观）。"""
         if player.is_human:
-            return {"type": "human"}
-        return {"type": "ai", "ai": player.ai.name}
+            return {"type": "human", "skin": player.skin}
+        return {"type": "ai", "ai": player.ai.name, "skin": player.skin}
 
     def _mode_label(self) -> str:
         """根据双方身份推断对局模式（人机大战 / 算法 PK / 人人对战）。"""

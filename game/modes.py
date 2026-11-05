@@ -15,6 +15,7 @@ from typing import Optional
 from core import BOARD_CLASSES
 from core.base_board import BLACK, WHITE
 from config import GAME_DEFAULTS
+from config.skins import from_record
 from ai.factory import create_ai
 from game.player import Player
 from game.controller import GameController
@@ -22,8 +23,9 @@ from utils.logger import log_warn
 
 
 def build_players(mode: str, p1_ai_name: Optional[str],
-                 p2_ai_name: Optional[str], config
-                 ) -> tuple[Player, Player]:
+                  p2_ai_name: Optional[str], config,
+                  skins: Optional[dict] = None
+                  ) -> tuple[Player, Player]:
     """
     按对局模式归一化双方算法配置并构造玩家对象。
 
@@ -31,10 +33,13 @@ def build_players(mode: str, p1_ai_name: Optional[str],
         mode:        对局模式；
         p1_ai_name:  先手（黑方）算法标识，None 表示人类；
         p2_ai_name:  后手（白方）算法标识，None 表示人类；
-        config:      全局运行配置。
+        config:      全局运行配置；
+        skins:       双方棋子外观 {BLACK: skin, WHITE: skin}；缺省用默认外观。
     返回：
         (先手玩家, 后手玩家)。
     """
+    skins = skins or {}
+
     # ---- 人人对战：强制双方为人类，忽略任何算法配置 ----
     if mode == "human_vs_human":
         p1_ai_name = None
@@ -61,14 +66,15 @@ def build_players(mode: str, p1_ai_name: Optional[str],
     ai1 = create_ai(p1_ai_name, BLACK, config)
     ai2 = create_ai(p2_ai_name, WHITE, config)
 
-    player1 = Player(BLACK, "黑方", ai1)
-    player2 = Player(WHITE, "白方", ai2)
+    player1 = Player(BLACK, "黑方", ai1, skin=skins.get(BLACK))
+    player2 = Player(WHITE, "白方", ai2, skin=skins.get(WHITE))
     return player1, player2
 
 
 def create_game(game_kind: str, mode: str,
                 p1_ai_name: Optional[str], p2_ai_name: Optional[str],
-                config, board_size: Optional[int] = None) -> GameController:
+                config, board_size: Optional[int] = None,
+                skins: Optional[dict] = None) -> GameController:
     """
     工厂方法：创建一局完整对局控制器。
 
@@ -78,7 +84,8 @@ def create_game(game_kind: str, mode: str,
         p1_ai_name:  先手算法标识；
         p2_ai_name:  后手算法标识；
         config:      全局运行配置；
-        board_size:  显式棋盘尺寸；None 时依次取 config.board_size、棋种默认值。
+        board_size:  显式棋盘尺寸；None 时依次取 config.board_size、棋种默认值；
+        skins:       双方棋子外观 {BLACK: skin, WHITE: skin}。
     """
     if game_kind not in BOARD_CLASSES:
         raise ValueError(f"未知棋种：{game_kind}")
@@ -87,16 +94,28 @@ def create_game(game_kind: str, mode: str,
     size = board_size or config.board_size or GAME_DEFAULTS[game_kind]["board_size"]
     board = board_cls(size)
 
-    player1, player2 = build_players(mode, p1_ai_name, p2_ai_name, config)
+    player1, player2 = build_players(mode, p1_ai_name, p2_ai_name, config,
+                                     skins=skins)
     return GameController(board, player1, player2, config, game_kind, size)
 
 
 def _role_to_player(role: Optional[dict], player_id: int, config) -> Player:
-    """把棋谱中的角色信息还原为玩家对象（AI 按记录算法创建，人类则无 AI）。"""
+    """把棋谱中的角色信息还原为玩家对象（含棋子外观字段 skin）。"""
+    skin = (role or {}).get("skin")
     if role and role.get("type") == "ai":
         ai = create_ai(role.get("ai"), player_id, config)
-        return Player(player_id, "黑方" if player_id == BLACK else "白方", ai)
-    return Player(player_id, "黑方" if player_id == BLACK else "白方", None)
+        return Player(player_id, "黑方" if player_id == BLACK else "白方",
+                      ai, skin=skin)
+    return Player(player_id, "黑方" if player_id == BLACK else "白方",
+                  None, skin=skin)
+
+
+def _role_spec(ai_name: Optional[str], skin: Optional[str]) -> dict:
+    """组装供 _role_to_player 使用的角色描述，保留棋谱中的外观。"""
+    role = {"type": "ai", "ai": ai_name} if ai_name else {"type": "human"}
+    if skin:
+        role["skin"] = skin
+    return role
 
 
 def _record_ai(role: Optional[dict]) -> Optional[str]:
@@ -144,8 +163,8 @@ def resume_game_from_record(record: dict, config,
     white_ai = _record_ai(players.get("white"))
     p1_name = black_ai if p1_ai is _UNSET else p1_ai
     p2_name = white_ai if p2_ai is _UNSET else p2_ai
-    player1 = _role_to_player({"type": "ai", "ai": p1_name} if p1_name
-                              else {"type": "human"}, BLACK, config)
-    player2 = _role_to_player({"type": "ai", "ai": p2_name} if p2_name
-                              else {"type": "human"}, WHITE, config)
+    # 旧棋谱没有 skin 字段：统一还原为经典纯色棋子，而不是新默认头像
+    record_skins = from_record(record)
+    player1 = _role_to_player(_role_spec(p1_name, record_skins[BLACK]), BLACK, config)
+    player2 = _role_to_player(_role_spec(p2_name, record_skins[WHITE]), WHITE, config)
     return GameController(board, player1, player2, config, game_kind, size)
