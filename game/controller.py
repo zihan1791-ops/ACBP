@@ -83,7 +83,10 @@ class GameController:
 
         legal = self.board.get_legal_moves()
         if move not in legal:
-            self.last_event = "该位置不合法，请重新选择"
+            reason = ""
+            if hasattr(self.board, "repeat_block_reason"):
+                reason = self.board.repeat_block_reason(move)
+            self.last_event = reason or "该位置不合法，请重新选择"
             return False
 
         self._push_snapshot()
@@ -147,8 +150,11 @@ class GameController:
         # 记录棋谱：落子方 = 刚落下棋子的颜色（apply_move 后仍可读取）
         last = self.board.last_move
         if last is not None:
+            # 象棋棋子编码为 side*10+kind，由棋盘自己给出落子方
+            side = (self.board.last_player() if hasattr(self.board, "last_player")
+                    else self.board.board[last[0]][last[1]])
             self.moves.append({
-                "player": self.board.board[last[0]][last[1]],
+                "player": side,
                 "move": [last[0], last[1]],
             })
         log_info(f"已落子 {self.board.move_count} 手，当前轮到 "
@@ -212,16 +218,31 @@ class GameController:
             return self.result_text()
         return f"轮到 {self.current_player.describe()} 落子"
 
-    def score_text(self) -> str:
-        """生成双方子力 / 提子信息文本；不支持子数统计的棋种返回空串。"""
-        if not hasattr(self.board, "count_pieces"):
+    def score_line(self) -> str:
+        """
+        纯比分文本（双方子数 / 提子），供对局栏与结算遮罩共用。
+
+        象棋按将死判胜，不以子数计分，故返回空串。
+        """
+        if not hasattr(self.board, "count_pieces") \
+                or hasattr(self.board, "repeat_status"):
             return ""
         black, white = self.board.count_pieces()
-        text = f"黑方 {black} 子 ｜ 白方 {white} 子"
+        text = f"黑方 {black} 子 : 白方 {white} 子"
         # 围棋额外显示提子数
         if hasattr(self.board, "black_captured"):
-            text += f" ｜ 黑提白 {self.board.black_captured} ｜ 白提黑 {self.board.white_captured}"
+            text += (f" ｜ 黑提白 {self.board.black_captured}"
+                     f" ｜ 白提黑 {self.board.white_captured}")
         return text
+
+    def score_text(self) -> str:
+        """
+        生成对局栏的统计文本；不支持统计的棋种返回空串。
+
+        象棋的「长打须变着」是规则，不占版面：只在违规被拒时给一次临时
+        事件提示，此处不常驻显示重复计数。
+        """
+        return self.score_line()
 
     # ===================== 内部工具 =====================
 

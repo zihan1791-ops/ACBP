@@ -154,13 +154,19 @@ class AlphaBetaAI(BaseAI):
 
         ordered = sort_moves_by_heuristic(board, legal, board.current_player)
 
+        # make/unmake：原地落子 + 回溯，取代每个分支一次 copy() + apply_move()。
+        # 这样既省掉棋盘对象构造（象棋构造器还会重摆 32 枚棋子），也省掉
+        # apply_move 里重复的合法性校验；try/finally 保证异常时也能还原。
         if board.current_player == self.player:
             # 极大层：轮到己方，追求最高分
             best = -math.inf
             for move in ordered:
-                child = board.copy()
-                child.apply_move(move)
-                score = self._search(child, depth - 1, alpha, beta)
+                if not board.push(move):
+                    continue
+                try:
+                    score = self._search(board, depth - 1, alpha, beta)
+                finally:
+                    board.pop()
                 best = max(best, score)
                 alpha = max(alpha, best)
                 if beta <= alpha:      # 剪枝：后续分支不可能更优
@@ -170,9 +176,12 @@ class AlphaBetaAI(BaseAI):
             # 极小层：轮到对手，假设对手选择对己方最不利的走法
             best = math.inf
             for move in ordered:
-                child = board.copy()
-                child.apply_move(move)
-                score = self._search(child, depth - 1, alpha, beta)
+                if not board.push(move):
+                    continue
+                try:
+                    score = self._search(board, depth - 1, alpha, beta)
+                finally:
+                    board.pop()
                 best = min(best, score)
                 beta = min(beta, best)
                 if beta <= alpha:      # 剪枝：后续分支不可能更差

@@ -8,15 +8,21 @@
 种群初始化、适应度评估、时间预算、思考状态可视化、强制预检全部在此闭环；
 子类只实现 _step() —— 即各自算法的进化算子。四种算法共用同一套
 「棋局 → 个体 → 适应度 → 落子」内部管线，外部层完全无感知。
+
+效率：个体适应度缓存 + 整代批量局面评估（numpy / 可选 CUDA），
+避免 10 秒预算被重复的纯 Python 推演吃光。
 """
 
 import random
 from typing import List, Optional, Tuple
 
+from ai.accel import backend_name, batch_scores
 from ai.base_ai import BaseAI
+from ai.evaluator import evaluate
+from core.base_board import DRAW
 from utils.helpers import MoveTimer
-from .kernel import (VERY_BAD, WIN_SCORE, current_candidates, fitness,
-                     forced_move, prior_vectors)
+from .kernel import (VERY_BAD, WIN_SCORE, current_candidates, decode,
+                     fitness, forced_move, prior_vectors)
 
 
 class EvolutionaryAI(BaseAI):
@@ -35,12 +41,14 @@ class EvolutionaryAI(BaseAI):
         self.time_limit = float(getattr(config, "evo_time", 8.0))
         self.rng = random.Random(getattr(config, "random_seed", None))
         self.timer = MoveTimer(self.time_limit)
+        self._backend = backend_name()   # numpy / cuda / cpu，仅探测一次
         self._reset_search()
 
     # -------------------- 搜索状态 --------------------
 
     def _reset_search(self) -> None:
         self._evaluated = 0
+        self._fitness_cache = {}      # 相同个体不重复推演
         self._best_score = VERY_BAD
         self._best_vec: Optional[List[float]] = None
         self._best_move: Optional[Tuple[int, int]] = None
@@ -57,16 +65,61 @@ class EvolutionaryAI(BaseAI):
         """评估一个个体，并维护全局最优与「每个首步的最好分」。"""
         if self.timer.timeout:
             return VERY_BAD
-        score, first = fitness(board, vector, self.player, self.horizon)
+        key = tuple(round(float(x), 7) for x in vector)
+        cached = self._fitness_cache.get(key)
+        if cached is None:
+            score, first = fitness(board, vector, self.player, self.horizon)
+            if len(self._fitness_cache) > 20000:
+                self._fitness_cache.clear()
+            self._fitness_cache[key] = (score, first)
+        else:
+            score, first = cached
+        return self._record(vector, score, first)
+
+    def _assess_population(self, board, population):
+        """
+        整代批量评估：推演在 CPU 逐个体完成，末局面打分交给 numpy / CUDA
+        一次性批量计算；后端不可用时回退逐局面 evaluator。
+        """
+        decoded = [decode(board, v, self.player, self.horizon)
+                   for v in population]
+        pending = [i for i, (first, state, _) in enumerate(decoded)
+                   if first is not None and not (state.game_over and state.winner)]
+        bulk = {}
+        if pending:
+            values = batch_scores([decoded[i][1] for i in pending], self.player)
+            if values is not None:
+                bulk = {i: float(v) for i, v in zip(pending, values)}
+
+        scores = []
+        for i, (vector, (first, state, steps)) in enumerate(zip(population, decoded)):
+            if first is None:
+                score = VERY_BAD
+            elif state.game_over and state.winner:
+                if state.winner == self.player:
+                    score = WIN_SCORE - steps
+                elif state.winner == DRAW:
+                    score = 0.0
+                else:
+                    score = -WIN_SCORE + steps
+            else:
+                score = bulk.get(i)
+                if score is None:
+                    score = evaluate(state, self.player)
+            key = tuple(round(float(x), 7) for x in vector)
+            self._fitness_cache[key] = (score, first)
+            scores.append(self._record(vector, score, first))
+        return scores
+
+    def _record(self, vector, score, first) -> float:
         self._evaluated += 1
-        if first is None:
-            return score
-        if score > self._move_scores.get(first, VERY_BAD):
-            self._move_scores[first] = score
-        if score > self._best_score:
-            self._best_score = score
-            self._best_vec = list(vector)
-            self._best_move = first
+        if first is not None:
+            if score > self._move_scores.get(first, VERY_BAD):
+                self._move_scores[first] = score
+            if score > self._best_score:
+                self._best_score = score
+                self._best_vec = list(vector)
+                self._best_move = first
         return score
 
     def _random_vector(self) -> List[float]:
@@ -90,8 +143,8 @@ class EvolutionaryAI(BaseAI):
         self.think.depth = gen
         self.think.max_depth = self.generations
         self.think.elapsed = self.timer.elapsed()
-        self.think.phase = "%s · 第 %d/%d 代" % (
-            self.optimizer, gen, self.generations)
+        self.think.phase = "%s · 第 %d/%d 代 [%s]" % (
+            self.optimizer, gen, self.generations, self._backend)
         self.think.best_move = self._best_move
         self.think.best_value = (self._best_score
                                 if self._best_score > VERY_BAD else 0.0)
@@ -107,6 +160,11 @@ class EvolutionaryAI(BaseAI):
 
     def select_move(self, board, on_progress=None) -> Optional[Tuple[int, int]]:
         self._begin_think()
+        # 推演视野按棋种自适应：象棋将军过滤贵、19 路围棋气计算贵
+        if type(board).__name__ == "ChessBoard":
+            self.horizon = min(self.horizon, 3)
+        elif type(board).__name__ == "GoBoard" and board.size >= 19:
+            self.horizon = min(self.horizon, 4)
         self._reset_search()
         self.timer.start()
 
@@ -131,7 +189,7 @@ class EvolutionaryAI(BaseAI):
             return forced
 
         pop = self._init_population(board)
-        scores = [self._assess(board, v) for v in pop]
+        scores = self._assess_population(board, pop)
         self._publish(0, "棋理先验已注入")
         self._emit(on_progress)
 

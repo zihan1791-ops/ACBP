@@ -52,14 +52,14 @@ def _build_parser() -> argparse.ArgumentParser:
     从而保证「不传命令行 = 完全使用源码全局变量调参」。
     """
     parser = argparse.ArgumentParser(
-        description="五子棋 / 黑白棋 人机大战与算法 PK 综合对战平台"
-                    "（围棋已暂停启用）",
+        description="五子棋 / 黑白棋 / 围棋 / 中国象棋 人机大战与算法 PK 综合对战平台",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
     # ---- 棋种与对局模式 ----
     parser.add_argument("--game", choices=S.VALID_GAMES, default=None,
-                        help="选择棋种：gomoku 五子棋 / othello 黑白棋")
+                        help="选择棋种：gomoku 五子棋 / othello 黑白棋 / "
+                             "go 围棋 / chess 中国象棋")
     parser.add_argument("--mode", choices=S.VALID_MODES, default=None,
                         help="对局模式：human_vs_ai / ai_vs_ai / human_vs_human")
     parser.add_argument("--board-size", type=int, default=None,

@@ -353,7 +353,11 @@ class MCTSAI(BaseAI):
                 move = self._heuristic_rollout_move(sim, legal)
             if move is None:
                 move = random.choice(legal)
-            sim.apply_move(move)
+            # 模拟步来自合法列表，可跳过重复规则校验（象棋尤其明显）
+            if hasattr(sim, "fast_apply"):
+                sim.fast_apply(move)
+            else:
+                sim.apply_move(move)
             steps += 1
 
         # 情况 A:模拟走到终局 —— 直接按真实胜负给分

@@ -44,31 +44,28 @@ class GomokuBoard(BaseBoard):
                     moves.append((r, c))
         return moves
 
-    def apply_move(self, move: Tuple[int, int]) -> bool:
-        """在指定位置落子，成功返回 True；非法落子返回 False 且不改变状态。"""
+    def _apply_unchecked(self, move) -> bool:
+        """
+        push() 用：调用方已保证 move 合法，跳过重复校验但保留终局判定。
+        五子棋落子本身就是 O(1) 数组写入，主要省掉的是 copy() 对象构造。
+        """
         row, col = move
-
-        # 对局已结束不再接受落子
-        if self.game_over:
+        if self.game_over or not self.in_bounds(row, col):
             return False
-        # 坐标越界
-        if not self.in_bounds(row, col):
-            return False
-        # 目标位置已有棋子
         if self.board[row][col] != EMPTY:
             return False
-
-        # 落子、记录、更新计数
         self.board[row][col] = self.current_player
         self.last_move = (row, col)
         self.move_count += 1
         self._record_move(row, col, self.current_player)
-
-        # 判定胜负与平局，再切换回合
         self._check_game_end()
         if not self.game_over:
             self._swap_player()
         return True
+
+    def apply_move(self, move: Tuple[int, int]) -> bool:
+        """在指定位置落子，成功返回 True；非法落子返回 False 且不改变状态。"""
+        return self._apply_unchecked(move)
 
     def _check_game_end(self) -> None:
         """检查最后一手是否连成五子；棋盘下满则判平局。"""

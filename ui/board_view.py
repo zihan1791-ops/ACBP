@@ -40,14 +40,28 @@ class BoardView:
 
     def _layout(self) -> None:
         """根据棋盘尺寸与视图矩形计算格距、原点坐标，保证棋盘居中。"""
-        n = self.board.size
         available_w = self.rect.width - theme.BOARD_MARGIN * 2
         available_h = self.rect.height - theme.BOARD_MARGIN * 2
+        n = self.board.size
+        if self._is_chess:
+            rows, cols = self.board.rows, self.board.cols
+            self.cell = min(available_w / cols, available_h / rows)
+            self.origin_x = self.rect.centerx - self.cell * cols / 2
+            self.origin_y = self.rect.centery - self.cell * rows / 2
+            return
         self.cell = min(available_w / n, available_h / n)
-
         grid_w = self.cell * n
         self.origin_x = self.rect.centerx - grid_w / 2
         self.origin_y = self.rect.centery - grid_w / 2
+
+    @property
+    def _is_chess(self) -> bool:
+        return type(self.board).__name__ == "ChessBoard"
+
+    def _grid_shape(self):
+        if self._is_chess:
+            return self.board.rows, self.board.cols
+        return self.board.size, self.board.size
 
     @property
     def _is_intersection_board(self) -> bool:
@@ -86,16 +100,17 @@ class BoardView:
         if self._coord_key == key:
             return
         self._coord_key = key
-        n = self.board.size
+        rows, cols = self._grid_shape()
         size = theme.S(14)
         f = assets.font("mono", size)
         items = []
         # 坐标是信息文字，用 INK_SOFT 而非仅装饰用的 INK_FAINT
-        for i in range(n):
+        for i in range(cols):
             col = f.render(chr(65 + i) if i < 26 else str(i), True, theme.INK_SOFT)
             items.append((col, (self.origin_x + i * self.cell - col.get_width() / 2,
                                 self.origin_y - theme.S(30))))
-            row = f.render("%02d" % (n - i), True, theme.INK_SOFT)
+        for i in range(rows):
+            row = f.render("%02d" % (rows - i), True, theme.INK_SOFT)
             items.append((row, (self.origin_x - theme.S(42) - row.get_width() / 2,
                                 self.origin_y + i * self.cell - row.get_height() / 2)))
         self._coord_items = items
@@ -126,22 +141,111 @@ class BoardView:
         if show_legal_hint:
             self._draw_legal_hints(surface)
 
+        # 象棋的走子轨迹画在棋子之下，避免线压在棋子上
+        if self._is_chess:
+            self._draw_chess_move_path(surface)
         self._draw_all_stones(surface)
         self._draw_last_move(surface)
 
     def _draw_grid_lines(self, surface: pygame.Surface) -> None:
-        """交叉点棋盘：外框线略重，内部发丝线。"""
-        n = self.board.size
-        end = n - 1
-        for i in range(n):
-            x = self.origin_x + i * self.cell
-            y = self.origin_y + i * self.cell
-            color = theme.INK_SOFT if i in (0, end) else theme.RULE
-            width = 2 if i in (0, end) else 1
-            pygame.draw.line(surface, color, (x, self.origin_y),
-                             (x, self.origin_y + end * self.cell), width)
-            pygame.draw.line(surface, color, (self.origin_x, y),
-                             (self.origin_x + end * self.cell, y), width)
+        """交叉点棋盘：外框线略重，内部发丝线；象棋走专用版式。"""
+        rows, cols = self._grid_shape()
+        max_x = self.origin_x + (cols - 1) * self.cell
+        max_y = self.origin_y + (rows - 1) * self.cell
+        if self._is_chess:
+            self._draw_chess_grid(surface, rows, cols, max_x, max_y)
+            return
+        for c in range(cols):
+            x = self.origin_x + c * self.cell
+            color = theme.INK_SOFT if c in (0, cols - 1) else theme.RULE
+            width = 2 if c in (0, cols - 1) else 1
+            pygame.draw.line(surface, color, (x, self.origin_y), (x, max_y), width)
+        for r in range(rows):
+            y = self.origin_y + r * self.cell
+            color = theme.INK_SOFT if r in (0, rows - 1) else theme.RULE
+            width = 2 if r in (0, rows - 1) else 1
+            pygame.draw.line(surface, color, (self.origin_x, y), (max_x, y), width)
+
+    # -------------------- 中国象棋专用版式 --------------------
+
+    def _draw_chess_grid(self, surface, rows, cols, max_x, max_y) -> None:
+        """
+        传统象棋盘：
+        · 10 条横线贯通，左右两条边线贯通；中间 7 条竖线在楚河汉界处断开；
+        · 上下九宫各画两条对角线，与网格合成「米」字；
+        · 炮位 / 兵位画 L 形定位折角。
+        """
+        river_top = self.origin_y + 4 * self.cell
+        river_bottom = self.origin_y + 5 * self.cell
+
+        for r in range(rows):
+            y = self.origin_y + r * self.cell
+            color = theme.INK_SOFT if r in (0, rows - 1) else theme.RULE
+            width = 2 if r in (0, rows - 1) else 1
+            pygame.draw.line(surface, color, (self.origin_x, y), (max_x, y), width)
+
+        for c in range(cols):
+            x = self.origin_x + c * self.cell
+            color = theme.INK_SOFT if c in (0, cols - 1) else theme.RULE
+            width = 2 if c in (0, cols - 1) else 1
+            if c in (0, cols - 1):
+                pygame.draw.line(surface, color, (x, self.origin_y),
+                                 (x, max_y), width)
+            else:
+                pygame.draw.line(surface, color, (x, self.origin_y),
+                                 (x, river_top), width)
+                pygame.draw.line(surface, color, (x, river_bottom),
+                                 (x, max_y), width)
+
+        # 九宫米字：col 3..5，上方 row 0..2、下方 row 7..9
+        x0 = self.origin_x + 3 * self.cell
+        x1 = self.origin_x + 5 * self.cell
+        for top in (0, 7):
+            y0 = self.origin_y + top * self.cell
+            y1 = self.origin_y + (top + 2) * self.cell
+            pygame.draw.line(surface, theme.RULE, (x0, y0), (x1, y1), 1)
+            pygame.draw.line(surface, theme.RULE, (x1, y0), (x0, y1), 1)
+
+        self._draw_chess_position_marks(surface)
+
+        mid_y = self.origin_y + 4.5 * self.cell
+        label = assets.mixed(theme.S(20), "楚 河        汉 界", theme.INK_SOFT)
+        surface.blit(label, label.get_rect(
+            center=((self.origin_x + max_x) / 2, mid_y)))
+
+    def _draw_chess_position_marks(self, surface) -> None:
+        """
+        炮位 / 兵位的标准 L 形标识（GB/T 棋具技术要求 3.7 / 3.8）：
+        交叉点四角各画一个独立的小直角，直角顶点靠近交叉点、两臂向外张开，
+        四个角互不相连，不是围成一圈的方框；落在边线上的点只画内侧两角。
+        """
+        marks = [(2, 1), (2, 7), (7, 1), (7, 7)]
+        marks += [(3, c) for c in (0, 2, 4, 6, 8)]
+        marks += [(6, c) for c in (0, 2, 4, 6, 8)]
+        # 比例按标准棋盘示意图：拐角距交叉点约 0.25 格，臂长约 0.13 格
+        gap = max(theme.S(7), int(self.cell * 0.25))
+        arm = max(theme.S(5), int(self.cell * 0.13))
+        left_limit = self.origin_x
+        right_limit = self.origin_x + (self.board.cols - 1) * self.cell
+
+        width = max(1, theme.S(1))
+        for row, col in marks:
+            x, y = self.cell_center(row, col)
+            x, y = int(x), int(y)
+            for sx in (-1, 1):
+                outer_x = x + sx * (gap + arm)
+                if outer_x < left_limit or outer_x > right_limit:
+                    continue          # 边线处的兵站只保留内侧两角
+                for sy in (-1, 1):
+                    corner_x = x + sx * gap
+                    corner_y = y + sy * gap
+                    outer_y = y + sy * (gap + arm)
+                    pygame.draw.line(surface, theme.RULE,
+                                     (corner_x, corner_y),
+                                     (outer_x, corner_y), width)
+                    pygame.draw.line(surface, theme.RULE,
+                                     (corner_x, corner_y),
+                                     (corner_x, outer_y), width)
 
     def _draw_square_lines(self, surface: pygame.Surface) -> None:
         """黑白棋方格棋盘：细墨分格线。"""
@@ -156,6 +260,8 @@ class BoardView:
 
     def _draw_star_points(self, surface: pygame.Surface) -> None:
         """星位改画成小十字，比圆点更贴印刷棋谱图。"""
+        if self._is_chess:
+            return
         n = self.board.size
         if n == 15:
             points = [(3, 3), (3, 11), (7, 7), (11, 3), (11, 11)]
@@ -173,19 +279,44 @@ class BoardView:
                              (x, y - arm), (x, y + arm), 1)
 
     def _draw_legal_hints(self, surface: pygame.Surface) -> None:
-        """人类回合：在合法空位上点一个淡墨小点，不抢棋子注意力。"""
+        """人类回合：在合法落点上点一个淡墨小点，不抢棋子注意力。"""
         r = max(theme.S(2), int(self.cell * 0.07))
-        for row, col in self.board.get_legal_moves():
+        for move in self.board.get_legal_moves():
+            if self._is_chess:
+                from core.chess.board import decode_sq
+                row, col = decode_sq(move[1])
+            else:
+                row, col = move
             x, y = self.cell_center(row, col)
             pygame.draw.circle(surface, theme.INK_FAINT, (int(x), int(y)), r)
 
     def _draw_all_stones(self, surface: pygame.Surface) -> None:
-        n = self.board.size
-        for r in range(n):
-            for c in range(n):
+        rows, cols = self._grid_shape()
+        for r in range(rows):
+            for c in range(cols):
                 piece = self.board.board[r][c]
-                if piece != EMPTY:
+                if piece == EMPTY:
+                    continue
+                if self._is_chess:
+                    self._draw_chess_piece(surface, r, c, piece)
+                else:
                     self._draw_stone(surface, r, c, piece)
+
+    def _draw_chess_piece(self, surface, row: int, col: int, piece: int) -> None:
+        """象棋：圆形棋子 + 汉字，红方朱砂、黑方墨色。"""
+        from core.chess.board import piece_side
+        x, y = self.cell_center(row, col)
+        cx, cy = int(x), int(y)
+        radius = int(self.cell * 0.42)
+        color = theme.CINNABAR if piece_side(piece) == BLACK else theme.INK
+        pygame.draw.circle(surface, theme.STONE_SHADOW,
+                           (cx + theme.S(2), cy + theme.S(2)), radius)
+        pygame.draw.circle(surface, theme.PAPER, (cx, cy), radius)
+        pygame.draw.circle(surface, color, (cx, cy), radius,
+                           max(2, int(self.cell * 0.06)))
+        name = self.board.piece_name_at(row, col)
+        glyph = assets.mixed(int(self.cell * 0.46), name, color)
+        surface.blit(glyph, glyph.get_rect(center=(cx, cy)))
 
     def _draw_stone(self, surface: pygame.Surface,
                     row: int, col: int, piece: int) -> None:
@@ -216,11 +347,36 @@ class BoardView:
         # 圆形裁切已在 ui/piece_skins 完成，这里直接贴图
         surface.blit(face, face.get_rect(center=(cx, cy)))
 
-    def _draw_last_move(self, surface: pygame.Surface) -> None:
-        """最后一手用朱砂四角括号定位，而不是盖住棋子的圆环。"""
+    def _draw_chess_move_path(self, surface: pygame.Surface) -> None:
+        """标注本手起点与走子轨迹（画在棋子之下）；落点括号仍由 _draw_last_move 画。"""
         if self.board.last_move is None:
             return
-        r, c = self.board.last_move
+        from core.chess.board import decode_sq
+        src, dst = self.board.last_move
+        r0, c0 = decode_sq(src)
+        r1, c1 = decode_sq(dst)
+        x0, y0 = self.cell_center(r0, c0)
+        x1, y1 = self.cell_center(r1, c1)
+        width = max(1, theme.S(1))
+        pygame.draw.line(surface, theme.RULE, (x0, y0), (x1, y1), width)
+        side = int(self.cell * 0.58)
+        box = pygame.Rect(int(x0 - side / 2), int(y0 - side / 2), side, side)
+        pygame.draw.rect(surface, theme.INK_SOFT, box, width)
+
+    def _draw_last_move(self, surface: pygame.Surface) -> None:
+        """最后一手用朱砂四角括号定位；象棋额外在起点补一个朱砂小点。"""
+        if self.board.last_move is None:
+            return
+        if self._is_chess:
+            from core.chess.board import decode_sq
+            r, c = decode_sq(self.board.last_move[1])
+            r0, c0 = decode_sq(self.board.last_move[0])
+            x0, y0 = self.cell_center(r0, c0)
+            pygame.draw.circle(surface, theme.CINNABAR,
+                               (int(x0), int(y0)),
+                               max(3, int(self.cell * 0.09)))
+        else:
+            r, c = self.board.last_move
         x, y = self.cell_center(r, c)
         side = int(self.cell * 0.74)
         box = pygame.Rect(int(x - side / 2), int(y - side / 2), side, side)
@@ -236,6 +392,8 @@ class BoardView:
         第 1 名朱砂实心，其余灰墨空心 —— 单强调色纪律。
         """
         s = theme.S
+        if self._is_chess:
+            return  # 象棋候选是起止点编码，不按坐标画圆点
         for idx, item in enumerate(top_moves[:3]):
             move = item[0]
             if move is None or not self.board.in_bounds(*move):

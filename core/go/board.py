@@ -10,6 +10,14 @@
 5. 简单打劫：禁止一手棋立即把上一手刚被提走的单颗子重新提回；
 6. 终局由玩家在界面点击「结束对局」触发，按「棋子 + 包围区域」简化数子判定胜负。
 
+性能设计（本轮改造）：
+    原先每个候选点都要用 set / BFS 试探性落子、收集连通块与气，19 路棋盘
+    下代价很高（实测 9 路中盘合法步生成 0.17ms，19 路更贵）。现在改为位板
+    连通块：整数「或 / 与」扩张求整块，再与空位板相交求气；一次合法步生成
+    只构建一次位板，逐候选点复用。二维列表仍是权威表示，试探不再写棋盘。
+
+    另提供 push/pop：搜索推演原地落子 + 回溯，额外保存提子数与打劫禁着点。
+
 本版本未实现（README 中已注明的课程范围限制）：
     全局劫争循环判定、贴目、双活 / 公活的精确处理、专业数子法。
 """
@@ -17,6 +25,7 @@
 from typing import List, Tuple, Set, Optional
 
 from core.base_board import BaseBoard, EMPTY, BLACK, WHITE, DRAW
+from core.bitboard import iter_bits, bit_count
 
 
 class GoBoard(BaseBoard):
@@ -30,50 +39,79 @@ class GoBoard(BaseBoard):
         # 打劫禁着点：上一手刚被提走的单颗子位置，下一手禁止落子于此；None 表示无禁着点
         self.ko_point: Optional[Tuple[int, int]] = None
 
+    # -------------------- 位板上下文 --------------------
+
+    def _go_ctx(self):
+        """(geometry, {取值: 位板}, occupied, empty)：一次构建，整轮复用。"""
+        geo, masks = self._bitboards()
+        occupied = masks[BLACK] | masks[WHITE]
+        return geo, masks, occupied, geo.full ^ occupied
+
     # -------------------- 规则接口实现 --------------------
 
     def get_legal_moves(self) -> List[Tuple[int, int]]:
         """返回当前玩家全部合法空位（排除自杀点与打劫禁着点）。"""
+        geo, masks, occupied, empty = self._go_ctx()
+        player = self.current_player
+        ko_bit = (1 << (self.ko_point[0] * self.size + self.ko_point[1])) \
+            if self.ko_point is not None else 0
         moves: List[Tuple[int, int]] = []
-        for r in range(self.size):
-            for c in range(self.size):
-                if self.board[r][c] != EMPTY:
-                    continue
-                if self.ko_point is not None and (r, c) == self.ko_point:
-                    continue
-                if self._placement_is_legal(r, c, self.current_player)[0]:
-                    moves.append((r, c))
+        # 只遍历空位所在的位，不再逐格判断是否为空格
+        for idx in iter_bits(empty & ~ko_bit):
+            row, col = divmod(idx, self.size)
+            if self._placement_is_legal(row, col, player,
+                                        (geo, masks, occupied, empty))[0]:
+                moves.append((row, col))
         return moves
 
-    def apply_move(self, move: Tuple[int, int]) -> bool:
-        """落子、提子并更新打劫禁着点；非法落子返回 False 且状态不变。"""
-        row, col = move
+    def _placement_is_legal(self, row: int, col: int, player: int,
+                            ctx=None) -> Tuple[bool, List[Tuple[int, int]]]:
+        """
+        位板版试探：返回 (是否合法, 落子后将被提走的对方棋子坐标列表)。
 
-        if self.game_over:
-            return False
-        if not self.in_bounds(row, col):
-            return False
-        if self.board[row][col] != EMPTY:
-            return False
-        if self.ko_point is not None and (row, col) == self.ko_point:
-            return False
+        不修改棋盘，也就不会破坏二维列表与位板的一致性。逻辑顺序：
+            1. 逻辑上落子 → 得到 occupied / empty；
+            2. 四个相邻方向上的对方连通块，无气者整块计入 captured；
+            3. 提子后重新求己方所在块的气，有气或提了子才合法（自杀禁着）。
+        """
+        if ctx is None:
+            ctx = self._go_ctx()
+        geo, masks, occupied, empty = ctx
+        idx = row * self.size + col
+        place = 1 << idx
+        opponent = self.opponent(player)
+        opp_mask = masks[opponent]
+        my_mask = masks[player] | place
+        occ_after = occupied | place
+        empty_after = empty & ~place
 
-        legal, captured = self._placement_is_legal(row, col, self.current_player)
-        if not legal:
-            return False
+        captured = 0
+        seen = 0
+        for ni in iter_bits(geo.neighbor_mask[idx] & opp_mask):
+            if (seen >> ni) & 1:
+                continue
+            group, libs = geo.group(opp_mask, ni)
+            seen |= group
+            if not (libs & empty_after):
+                captured |= group
 
-        # 正式落子
-        self.board[row][col] = self.current_player
+        occ_final = occ_after & ~captured
+        empty_final = geo.full ^ occ_final
+        _, my_libs = geo.group(my_mask, idx)
+        legal = bool(my_libs & empty_final) or bool(captured)
+        return legal, geo.cells_of(captured) if captured else []
 
-        # 提走所有无气的对方连通块，并累计提子数
+    def _apply_core(self, row: int, col: int, captured) -> None:
+        """落子 + 提子 + 打劫 / 计数更新（不含合法性校验）。"""
+        player = self.current_player
+        self.board[row][col] = player
         for cr, cc in captured:
             self.board[cr][cc] = EMPTY
-        if self.current_player == BLACK:
+        if player == BLACK:
             self.black_captured += len(captured)
         else:
             self.white_captured += len(captured)
 
-        # 更新打劫禁着点：仅当刚提走对方单颗子时，该位置成为下一手禁着点
         if len(captured) == 1:
             self.ko_point = captured[0]
         else:
@@ -81,9 +119,27 @@ class GoBoard(BaseBoard):
 
         self.last_move = (row, col)
         self.move_count += 1
-        self._record_move(row, col, self.current_player)
+        self._record_move(row, col, player)
         self._swap_player()
+
+    def _apply_unchecked(self, move) -> bool:
+        """push() 用：调用方保证 move 合法；提子计算仍须按规则执行。"""
+        row, col = move
+        if self.game_over or not self.in_bounds(row, col):
+            return False
+        if self.board[row][col] != EMPTY:
+            return False
+        if self.ko_point is not None and (row, col) == self.ko_point:
+            return False
+        legal, captured = self._placement_is_legal(row, col, self.current_player)
+        if not legal:
+            return False
+        self._apply_core(row, col, captured)
         return True
+
+    def apply_move(self, move: Tuple[int, int]) -> bool:
+        """落子、提子并更新打劫禁着点；非法落子返回 False 且状态不变。"""
+        return self._apply_unchecked(move)
 
     def _check_game_end(self) -> None:
         """围棋不自动判定终局；终局由 end_game_manually() 手动触发。"""
@@ -114,70 +170,33 @@ class GoBoard(BaseBoard):
         new_board.ko_point = self.ko_point
         return new_board
 
+    # -------------------- push/pop 额外状态 --------------------
+
+    def _snapshot(self) -> tuple:
+        return super()._snapshot() + (self.black_captured,
+                                      self.white_captured, self.ko_point)
+
+    def _restore(self, snap: tuple) -> None:
+        super()._restore(snap)
+        self.black_captured = snap[7]
+        self.white_captured = snap[8]
+        self.ko_point = snap[9]
+
     # -------------------- 规则辅助计算 --------------------
 
     def _collect_group(self, row: int, col: int) -> Tuple[Set[Tuple[int, int]], Set[Tuple[int, int]]]:
         """
-        从 (row, col) 出发 BFS，收集同色连通块及其全部气（相邻空位）。
+        从 (row, col) 出发求同色连通块及其气；位板版，供外部 / 测试调用。
 
-        返回：
-            group:    连通块内所有棋子坐标集合；
-            liberties: 该连通块的气（相邻空位坐标集合）。
+        返回 (连通块坐标集合, 气的坐标集合)，与旧 set-BFS 实现语义一致。
         """
         color = self.board[row][col]
-        group: Set[Tuple[int, int]] = set()
-        liberties: Set[Tuple[int, int]] = set()
-        queue: List[Tuple[int, int]] = [(row, col)]
-        group.add((row, col))
-
-        # 围棋的气只看上下左右四个正交方向，不看斜向
-        orthogonal = [(-1, 0), (1, 0), (0, -1), (0, 1)]
-        while queue:
-            r, c = queue.pop()
-            for dr, dc in orthogonal:
-                nr, nc = r + dr, c + dc
-                if not self.in_bounds(nr, nc):
-                    continue
-                if self.board[nr][nc] == EMPTY:
-                    liberties.add((nr, nc))
-                elif self.board[nr][nc] == color and (nr, nc) not in group:
-                    group.add((nr, nc))
-                    queue.append((nr, nc))
-        return group, liberties
-
-    def _placement_is_legal(self, row: int, col: int, player: int
-                             ) -> Tuple[bool, List[Tuple[int, int]]]:
-        """
-        试探性判断在 (row, col) 落子是否合法。
-
-        返回：
-            (是否合法, 落子后将被提走的对方棋子坐标列表)
-        该方法不修改棋盘最终状态；仅在内部临时落子后回滚。
-        """
-        opponent = self.opponent(player)
-
-        # 临时落子
-        self.board[row][col] = player
-        captured: List[Tuple[int, int]] = []
-
-        # 检查四个正交相邻方向上的对方连通块，收集无气者
-        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            nr, nc = row + dr, col + dc
-            if not self.in_bounds(nr, nc) or self.board[nr][nc] != opponent:
-                continue
-            group, liberties = self._collect_group(nr, nc)
-            if not liberties:
-                captured.extend(group)
-
-        # 检查己方连通块是否还有气
-        _, my_liberties = self._collect_group(row, col)
-
-        # 自杀判定：己方无气且没有提走对方棋子 → 非法，回滚
-        legal = bool(my_liberties) or bool(captured)
-
-        # 撤销临时落子（被提子此时尚未真正从棋盘移除，无需恢复）
-        self.board[row][col] = EMPTY
-        return legal, captured
+        if color == EMPTY:
+            return set(), set()
+        geo, masks, occupied, empty = self._go_ctx()
+        idx = row * self.size + col
+        group, libs = geo.group(masks[color], idx)
+        return set(geo.cells_of(group)), set(geo.cells_of(libs & empty))
 
     def score_territory(self) -> Tuple[float, float]:
         """
@@ -222,11 +241,5 @@ class GoBoard(BaseBoard):
 
     def count_pieces(self) -> Tuple[int, int]:
         """统计黑、白棋子数量，返回 (黑棋数, 白棋数)。"""
-        black = white = 0
-        for row in self.board:
-            for cell in row:
-                if cell == BLACK:
-                    black += 1
-                elif cell == WHITE:
-                    white += 1
-        return black, white
+        _, masks = self._bitboards()
+        return bit_count(masks[BLACK]), bit_count(masks[WHITE])

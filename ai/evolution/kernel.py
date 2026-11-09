@@ -31,14 +31,28 @@ def current_candidates(state) -> List[Tuple[int, int]]:
     return cands if cands else state.get_legal_moves()
 
 
+def _fast_candidates(state):
+    """推演中的对手候选：象棋直接用伪合法走法，省掉整盘将军过滤。"""
+    if type(state).__name__ == "ChessBoard":
+        return state._pseudo_moves(state.current_player)
+    return current_candidates(state)
+
+
+def _fast_apply(state, move):
+    """推演落子：棋盘提供 fast_apply 时跳过重复合法性校验。"""
+    if hasattr(state, "fast_apply"):
+        return state.fast_apply(move)
+    return state.apply_move(move)
+
+
 def _heuristic_reply(state) -> bool:
     """轻量对手模型：取候选中棋理分最高的一步应手（一层贪心近似最优应对）。"""
-    cands = current_candidates(state)[:OPPONENT_TOP]
+    cands = _fast_candidates(state)[:OPPONENT_TOP]
     if not cands:
         return False
     mover = state.current_player
     best = max(cands, key=lambda m: move_heuristic_score(state, m, mover))
-    return state.apply_move(best)
+    return _fast_apply(state, best)
 
 
 def decode(board, vector, player, horizon):
@@ -72,7 +86,7 @@ def decode(board, vector, player, horizon):
         move = cands[idx]
         if first is None:
             first = move
-        if not state.apply_move(move):
+        if not _fast_apply(state, move):
             break
         steps += 1
         if state.game_over:

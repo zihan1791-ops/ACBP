@@ -42,6 +42,11 @@ def create_ai(algo_name: Optional[str], player: int, config) -> Optional[BaseAI]
     if algo_name is None:
         return None
 
+    if algo_name == "edax":
+        # 延迟导入：未选该算法时不加载适配层，也不检查外部引擎文件
+        from .othello_ext.edax_ai import EdaxAI
+        return EdaxAI(player, config)
+
     if algo_name not in _REGISTRY:
         log_warn(f"未知 AI 算法 {algo_name}，已退回随机策略")
         algo_name = "random"

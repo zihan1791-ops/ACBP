@@ -30,6 +30,21 @@ _OTHELLO_WEIGHTS: List[List[int]] = [
 ]
 
 
+def _chess_score(board, player: int) -> float:
+    """中国象棋：子力差 + 中心控制（轻量版，避免每次生成全合法步）。"""
+    opponent = board.opponent(player)
+    material = board.piece_values(player) - board.piece_values(opponent)
+    center = 0
+    for r in range(board.rows):
+        for c in range(board.cols):
+            cell = board.board[r][c]
+            if not cell:
+                continue
+            weight = (4 - abs(4 - c)) * 2
+            center += weight if cell // 10 == player else -weight
+    return float(material + center)
+
+
 def evaluate(board, player: int) -> float:
     """根据棋盘类型自动选择评估器，返回 player 视角的局面分值。"""
     class_name = type(board).__name__
@@ -39,6 +54,8 @@ def evaluate(board, player: int) -> float:
         return _othello_score(board, player)
     if class_name == "GoBoard":
         return _go_score(board, player)
+    if class_name == "ChessBoard":
+        return _chess_score(board, player)
     return 0.0
 
 

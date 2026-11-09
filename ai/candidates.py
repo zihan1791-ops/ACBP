@@ -21,6 +21,10 @@ from ai.evaluator import _pattern_score, _GOMOKU_DIRS, _OTHELLO_WEIGHTS
 # 邻域裁剪半径（格）：离已有棋子多远仍视为「相关候选」
 CANDIDATE_RADIUS = 2
 
+# 中国象棋走法为 (起点编码, 终点编码)，编码 = row * 9 + col
+_CHESS_COLS = 9
+_CHESS_GAIN = {1: 10000, 2: 200, 3: 200, 4: 400, 5: 900, 6: 450, 7: 100}
+
 
 def is_near_stone(board, move: Tuple[int, int], radius: int = 1) -> bool:
     """判断 move 是否落在已有棋子 radius 格邻域内。"""
@@ -48,7 +52,8 @@ def candidate_moves(board) -> List[Tuple[int, int]]:
         return []
 
     kind = type(board).__name__
-    if kind == "OthelloBoard":
+    if kind in ("OthelloBoard", "ChessBoard"):
+        # 合法步本身已足够少（或走法含起止点），不做邻域裁剪
         return legal
 
     # 棋盘尚无棋子：五子棋落在中心附近即可，围棋同理
@@ -277,6 +282,12 @@ def move_heuristic_score(board, move: Tuple[int, int], player: int) -> float:
     """
     r, c = move
     kind = type(board).__name__
+
+    if kind == "ChessBoard":
+        tr, tc = divmod(c, _CHESS_COLS)
+        victim = board.board[tr][tc] if board.in_bounds(tr, tc) else 0
+        gain = _CHESS_GAIN.get(victim % 10, 0) if victim else 0
+        return float(gain + (4 - abs(4 - tc)) * 2)
 
     if kind == "OthelloBoard":
         if board.in_bounds(r, c):

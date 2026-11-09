@@ -57,7 +57,7 @@ class ImprovedGeneticAI(EvolutionaryAI):
                     child[d] = (child[d] + self.rng.gauss(0.0, 0.15)) % 1.0
             new_pop.append(child)
 
-        return new_pop, [self._assess(board, v) for v in new_pop]
+        return new_pop, self._assess_population(board, new_pop)
 
 
 class DifferentialEvolutionAI(EvolutionaryAI):
@@ -135,7 +135,7 @@ class ParticleSwarmAI(EvolutionaryAI):
             self._velocity[i] = nv
             new_pop.append(nx)
 
-        new_scores = [self._assess(board, v) for v in new_pop]
+        new_scores = self._assess_population(board, new_pop)
         for i, s in enumerate(new_scores):
             if s > self._pbest_scores[i]:
                 self._pbest_scores[i] = s

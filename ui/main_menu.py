@@ -29,7 +29,10 @@ from core.base_board import BLACK, WHITE
 class MainMenu:
     """开局主菜单界面。"""
 
-    GAME_LABELS: Dict[str, str] = {"gomoku": "五子棋", "othello": "黑白棋"}
+    GAME_LABELS: Dict[str, str] = {
+        "gomoku": "五子棋", "othello": "黑白棋",
+        "go": "围棋", "chess": "中国象棋",
+    }
     MODE_LABELS: Dict[str, str] = {
         "human_vs_ai": "人机大战",
         "ai_vs_ai": "算法 PK",
@@ -38,7 +41,7 @@ class MainMenu:
     AI_LABELS: Dict[Optional[str], str] = {
         None: "人类", "mcts": "MCTS", "alphabeta": "Alpha-Beta",
         "random": "随机", "iga": "改进GA", "de": "差分进化",
-        "pso": "粒子群", "abc": "人工蜂群",
+        "pso": "粒子群", "abc": "人工蜂群", "edax": "Edax",
     }
 
     def __init__(self, cfg, on_start: Callable[[dict], None],
@@ -85,12 +88,18 @@ class MainMenu:
     # ===================== 模式与身份联动（契约，逻辑不变） =====================
 
     def _player_options(self, key: str) -> List[Tuple[Optional[str], str]]:
+        from ai.othello_ext import is_available
         if self.mode == "human_vs_human":
-            return [(None, self.AI_LABELS[None])]
-        if self.mode == "ai_vs_ai":
-            return [(k, self.AI_LABELS[k]) for k in VALID_AIS]
-        return [(None, self.AI_LABELS[None])] + \
-            [(k, self.AI_LABELS[k]) for k in VALID_AIS]
+            options = [(None, self.AI_LABELS[None])]
+        elif self.mode == "ai_vs_ai":
+            options = [(k, self.AI_LABELS[k]) for k in VALID_AIS]
+        else:
+            options = [(None, self.AI_LABELS[None])] + \
+                [(k, self.AI_LABELS[k]) for k in VALID_AIS]
+        # Edax 只在黑白棋且引擎文件齐备时出现，五子棋彻底不可见
+        if self.game_kind != "othello" or not is_available():
+            options = [item for item in options if item[0] != "edax"]
+        return options
 
     def _normalize_for_mode(self) -> None:
         if self.mode == "human_vs_human":
@@ -239,6 +248,12 @@ class MainMenu:
         if attr == "game_kind":
             self.board_size = None
             self.notice = ""
+            if value != "othello":
+                # 切到五子棋时清掉黑白棋专用算法，避免出现不可见选项
+                if self.p1_ai == "edax":
+                    self.p1_ai = "alphabeta"
+                if self.p2_ai == "edax":
+                    self.p2_ai = "alphabeta"
         elif attr == "mode":
             self._normalize_for_mode()
             self.notice = "已按「%s」重置双方身份" % self.MODE_LABELS[self.mode]

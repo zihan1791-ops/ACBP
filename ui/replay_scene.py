@@ -41,7 +41,8 @@ class ReplayScene:
     ROLE_LABELS: dict = {None: "人类", "mcts": "MCTS",
                          "alphabeta": "Alpha-Beta", "random": "随机",
                          "iga": "改进GA", "de": "差分进化",
-                         "pso": "粒子群", "abc": "人工蜂群"}
+                         "pso": "粒子群", "abc": "人工蜂群",
+                         "edax": "Edax"}
 
     def __init__(self, cfg, on_back: Callable[[], None],
                  on_resume: Optional[Callable[[dict, int], None]] = None) -> None:
@@ -239,11 +240,22 @@ class ReplayScene:
         self._row_labels = []
         self._indicators = []
 
+        from ai.othello_ext import is_available
+        othello_record = (self.record or {}).get("game") == "othello"
+        if not othello_record:
+            if self.setup_p1 == "edax":
+                self.setup_p1 = "alphabeta"
+            if self.setup_p2 == "edax":
+                self.setup_p2 = "alphabeta"
+
         def option_row(y: int, label: str, current, on_select, row_no: int) -> None:
             options = [(None, "人类"), ("mcts", "MCTS"),
                        ("alphabeta", "Alpha-Beta"), ("random", "随机"),
                        ("iga", "改进GA"), ("de", "差分进化"),
-                       ("pso", "粒子群"), ("abc", "人工蜂群")]
+                       ("pso", "粒子群"), ("abc", "人工蜂群"),
+                       ("edax", "Edax")]
+            if not othello_record or not is_available():
+                options = [item for item in options if item[0] != "edax"]
             btn_w, btn_h, gap = s(150), s(52), s(12)
             if len(options) > 5:
                 # 并排显示 3 个选项，< > 循环移动选中项，避免溢出左侧标签区
@@ -597,6 +609,6 @@ class ReplayScene:
         if role.get("type") == "ai":
             return {"mcts": "MCTS", "alphabeta": "Alpha-Beta",
                     "random": "随机", "iga": "改进GA", "de": "差分进化",
-                    "pso": "粒子群", "abc": "人工蜂群"}.get(
-                        role.get("ai"), role.get("ai"))
+                    "pso": "粒子群", "abc": "人工蜂群",
+                    "edax": "Edax"}.get(role.get("ai"), role.get("ai"))
         return "人类"

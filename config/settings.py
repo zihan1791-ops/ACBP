@@ -137,21 +137,27 @@ GAME_DEFAULTS = {
         'board_size': 8,
         'allowed_sizes': [8],
     },
-    # 围棋（go）已暂停启用：规则与 AI 代码保留兼容，入口全部关闭
     'go': {
         'name': '围棋',
         'board_size': 9,
-        'allowed_sizes': [9, 13],
+        'allowed_sizes': [9, 13, 19],
+    },
+    'chess': {
+        'name': '中国象棋',
+        'board_size': 10,
+        'allowed_sizes': [10],
     },
 }
 
-# 当前实际开放给玩家选择的棋种（围棋已暂停）
-ACTIVE_GAMES = ['gomoku', 'othello']
+# 当前实际开放给玩家选择的棋种
+ACTIVE_GAMES = ['gomoku', 'othello', 'go', 'chess']
 
 # 合法选项集合，供参数校验使用（与对外开放选项保持一致）
 VALID_GAMES = ACTIVE_GAMES
 VALID_MODES = ['human_vs_ai', 'ai_vs_ai', 'human_vs_human']
-VALID_AIS = ['mcts', 'alphabeta', 'random', 'iga', 'de', 'pso', 'abc']
+# 'edax' 为黑白棋专用外部引擎（可选）：本体位于 vendor/edax/，缺失时菜单自动隐藏；
+# 可用环境变量与深度/超时配置见 ai/othello_ext 模块说明。
+VALID_AIS = ['mcts', 'alphabeta', 'random', 'iga', 'de', 'pso', 'abc', 'edax']
 
 
 # ===================== 五、棋谱与日志 =====================

@@ -44,11 +44,13 @@ class GameScene:
         "state_line": 88,
         "identity": [100, 130],
         "info_line": 158,
-        "info": 168,
+        # 统计常驻一行、事件提示独立一行：避免悔棋 / 重开提示把子数盖掉
+        "score": 166,
+        "event": 186,
         # 有 AI：演算 + 候选 + 棋谱
-        "think_line": 196,
-        "think_label": 208,
-        "think_body": 240,
+        "think_line": 208,
+        "think_label": 220,
+        "think_body": 252,
         "cand_line": 442,
         "cand_label": 454,
         "cand_rows": 486,
@@ -58,9 +60,9 @@ class GameScene:
         "log_step": 30,
         "log_count": 4,
         # 无 AI：演算/候选隐藏，棋谱独占
-        "solo_log_line": 196,
-        "solo_log_label": 208,
-        "solo_log_rows": 244,
+        "solo_log_line": 208,
+        "solo_log_label": 220,
+        "solo_log_rows": 256,
         "solo_log_step": 32,
         "solo_log_count": 15,
     }
@@ -76,6 +78,12 @@ class GameScene:
         self._last_progress_draw = 0
         self._last_candidates: list = []
         self._last_move_count = -1
+        # 事件提示限时显示：统计行常驻，事件不长期占据版面
+        self._last_event_text = None
+        self._last_event_at = 0.0
+        # 将军弹窗：状态新出现时弹出，未解除期间保留小字角标
+        self._check_was_active = False
+        self._check_alert_at = 0.0
         self._log_y = None            # 走查用：记录棋谱标签 y，验证布局恒定
         self._ai_mode = ai_runner.default_mode()
         self._runner = None           # 全局共享的长驻 AI worker（惰性取用）
@@ -93,25 +101,39 @@ class GameScene:
         self.panel = Panel(panel_rect)
 
         self.buttons: List[Button] = []
+        self._chess_selected = None   # 象棋两段式点击的已选起点
         self._build_buttons(panel_rect)
 
     # ===================== 控件构建 =====================
 
     def _build_buttons(self, panel_rect: pygame.Rect) -> None:
-        """棋盘下方横排三枚按钮，高 48 逻辑（物理 72px）。"""
+        """棋盘下方按钮；围棋额外提供「结束对局」（手动数子终局）。"""
         s = theme.S
         self.buttons.clear()
         y, h = s(800), s(48)
-        specs = [
-            (s(36), s(250), "悔棋", self._undo, False),
-            (s(300), s(250), "重新开始", self._restart, False),
-            (s(570), s(266), "返回主菜单", self.on_back, True),
-        ]
+        if getattr(self.ctrl, "game_kind", "") == "go":
+            specs = [
+                (s(36), s(190), "悔棋", self._undo, False),
+                (s(236), s(190), "重新开始", self._restart, False),
+                (s(436), s(190), "结束对局", self._finish, False),
+                (s(636), s(190), "返回主菜单", self.on_back, True),
+            ]
+        else:
+            specs = [
+                (s(36), s(250), "悔棋", self._undo, False),
+                (s(300), s(250), "重新开始", self._restart, False),
+                (s(570), s(266), "返回主菜单", self.on_back, True),
+            ]
         for i, (x, width, text, callback, accent) in enumerate(specs):
             btn = Button((x, y, width, h), text, on_click=callback,
                          font_size=theme.FONT_BODY, accent=accent)
             btn.reveal_delay = 320 + i * theme.MOTION["stagger"]
             self.buttons.append(btn)
+
+    def _finish(self) -> None:
+        """围棋：手动结束对局，触发简化数子判定胜负。"""
+        self._cancel_pending()
+        self.ctrl.finish_manually()
 
     # ===================== 事件处理 =====================
 
@@ -130,9 +152,30 @@ class GameScene:
             if btn.handle_event(event):
                 return
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            move = self.board_view.pixel_to_cell(event.pos)
-            if move is not None:
-                self.ctrl.handle_human_move(move)
+            cell = self.board_view.pixel_to_cell(event.pos)
+            if cell is None:
+                return
+            if type(self.ctrl.board).__name__ == "ChessBoard":
+                self._handle_chess_click(cell)
+            else:
+                self.ctrl.handle_human_move(cell)
+
+    def _handle_chess_click(self, cell) -> None:
+        """象棋两段式点击：先选己方棋子，再点目标格。"""
+        board = self.ctrl.board
+        r, c = cell
+        piece = board.board[r][c]
+        own = bool(piece) and piece // 10 == board.current_player
+        if self._chess_selected is None:
+            if own:
+                self._chess_selected = cell
+            return
+        move = board.move_from_clicks(self._chess_selected, cell)
+        if move is not None:
+            self.ctrl.handle_human_move(move)
+            self._chess_selected = None
+        else:
+            self._chess_selected = cell if own else None
 
     def update(self) -> None:
         self.board_view.board = self.ctrl.board
@@ -344,8 +387,13 @@ class GameScene:
 
         human_turn = not self.ctrl.is_over and not self.ctrl.current_is_ai
         self.board_view.draw(surface, show_legal_hint=human_turn)
+        if self._chess_selected is not None:
+            x, y = self.board_view.cell_center(*self._chess_selected)
+            pygame.draw.circle(surface, theme.CINNABAR, (int(x), int(y)),
+                               max(4, int(self.board_view.cell * 0.48)), 3)
         if self._last_candidates:
             self.board_view.draw_candidate_marks(surface, self._last_candidates)
+        self._draw_check_alert(surface)
 
         self.panel.draw(surface)
         self._draw_status(surface)
@@ -369,6 +417,59 @@ class GameScene:
     def _panel_xy(self):
         p = self.panel.rect
         return p.x + theme.S(24), p.y, p
+
+    # --------------------- 将军提示 ---------------------
+
+    CHECK_ALERT_SECONDS = 3.0
+
+    def _chess_in_check(self) -> bool:
+        """当前行棋方是否正被将军；终局与非象棋场景不提示。"""
+        board = self.ctrl.board
+        if type(board).__name__ != "ChessBoard" or self.ctrl.is_over:
+            return False
+        return board.in_check()
+
+    def _draw_check_alert(self, surface: pygame.Surface) -> None:
+        """
+        将军时弹出醒目提示。
+
+        弹窗放在楚河汉界带中央——那里没有棋子交叉点，不遮挡任何落子位置；
+        出现后显示 3 秒收起，将军未解除期间保留河界右侧的小字角标持续提示。
+        纯绘制层，不拦截点击，玩家仍可正常应将。
+        """
+        s = theme.S
+        if not self._chess_in_check():
+            self._check_was_active = False
+            self._check_alert_at = 0.0
+            return
+        now = time.time()
+        if not self._check_was_active:
+            self._check_was_active = True
+            self._check_alert_at = now
+
+        rect = self.board_view.rect
+        river_y = int(self.board_view.origin_y + 4.5 * self.board_view.cell)
+        badge = assets.mixed(s(18), "将 军 · 须应将", theme.CINNABAR)
+        surface.blit(badge, badge.get_rect(
+            midright=(rect.right - s(24), river_y)))
+
+        if now - self._check_alert_at >= self.CHECK_ALERT_SECONDS:
+            return
+
+        w, h = s(300), s(88)
+        card = pygame.Rect(0, 0, w, h)
+        card.center = (rect.centerx, river_y)
+        shade = pygame.Surface((w, h), pygame.SRCALPHA)
+        shade.fill((*theme.SURFACE, 236))
+        surface.blit(shade, card.topleft)
+        pygame.draw.rect(surface, theme.CINNABAR, card, max(2, s(3)),
+                         border_radius=theme.RADIUS)
+        title = assets.mixed(s(34), "将 军！", theme.CINNABAR)
+        surface.blit(title, title.get_rect(
+            center=(card.centerx, card.centery - s(12))))
+        sub = assets.mixed(s(15), "须应将 · 请先解将", theme.INK_SOFT)
+        surface.blit(sub, sub.get_rect(
+            center=(card.centerx, card.centery + s(22))))
 
     def _draw_status(self, surface: pygame.Surface) -> None:
         """右栏顶部：棋种 + 轮到谁（终局显示结果）+ 双方身份 + 一行信息。"""
@@ -401,12 +502,23 @@ class GameScene:
 
         atmosphere.hairline(surface, (x, top + s(L["info_line"])),
                             (panel.right - s(24), top + s(L["info_line"])))
+
+        # 统计行常驻：悔棋 / 重开 / 结算都不会被子数以外的文字覆盖
+        score = self.ctrl.score_text()
+        if score:
+            glyph = assets.mixed(s(16), score, theme.INK_SOFT)
+            surface.blit(self._clip(glyph, panel.right - s(24) - x),
+                         (x, top + s(L["score"])))
+
+        # 事件提示独立一行并限时 4 秒，避免旧事件长期挂着
         event = self.ctrl.last_event
-        info = event or self.ctrl.score_text()
-        if info:
-            color = theme.CINNABAR if event else theme.INK_SOFT
-            surface.blit(assets.mixed(s(17), info, color),
-                         (x, top + s(L["info"])))
+        if event != self._last_event_text:
+            self._last_event_text = event
+            self._last_event_at = time.time()
+        if event and time.time() - self._last_event_at < 4.0:
+            glyph = assets.mixed(s(15), event, theme.CINNABAR)
+            surface.blit(self._clip(glyph, panel.right - s(24) - x),
+                         (x, top + s(L["event"])))
 
     # --------------------- 演算区 ---------------------
 
@@ -594,3 +706,13 @@ class GameScene:
             self.ctrl.result_text(), True, theme.INK)
         surface.blit(result, result.get_rect(center=(rect.centerx,
                                                      rect.centery)))
+
+        # 结算比分：黑白棋 / 围棋按子数计分，遮罩上直接给出，不再只显示胜负
+        score = self.ctrl.score_line()
+        if score:
+            pygame.draw.line(surface, theme.RULE_LIGHT,
+                             (rect.centerx - s(130), rect.centery + s(42)),
+                             (rect.centerx + s(130), rect.centery + s(42)), 1)
+            glyph = assets.mixed(s(26), score, theme.INK)
+            surface.blit(glyph, glyph.get_rect(
+                center=(rect.centerx, rect.centery + s(74))))
