@@ -17,6 +17,7 @@ import math
 from typing import Optional, Tuple
 
 from .base_ai import BaseAI
+from .analysis_log import record_search
 from .evaluator import evaluate
 from .candidates import (
     candidate_moves, gomoku_winning_moves, gomoku_attack_points,
@@ -43,9 +44,12 @@ class AlphaBetaAI(BaseAI):
         self.time_limit = float(config.ab_time)
         # 本轮已评估的搜索节点数（用于可视化与日志）
         self._nodes = 0
+        self.record = None
+        self._progress = None
 
     # -------------------- 对外接口 --------------------
 
+    @record_search
     def select_move(self, board, on_progress=None) -> Optional[Tuple[int, int]]:
         """在候选步中选出 Alpha-Beta 迭代加深评估最优的一步。"""
         legal = candidate_moves(board)
@@ -79,6 +83,9 @@ class AlphaBetaAI(BaseAI):
         best_score = -math.inf
         timer = MoveTimer(self.time_limit)
         timer.start()
+        self._progress = on_progress
+        self._timer = timer
+        self._next_update = 0.0
 
         for depth in range(1, self.max_depth + 1):
             if timer.timeout:
@@ -87,21 +94,29 @@ class AlphaBetaAI(BaseAI):
             alpha, beta = -math.inf, math.inf
             layer_best_move, layer_best_score = ordered[0], -math.inf
 
+            layer = self.record.add(self.record.root, None, f"深度 {depth}", role="MAX",
+                                    alpha=alpha, beta=beta) if self.record else None
+            self.think.depth = depth
+            self.think.phase = f"迭代加深 · 第 {depth} 层"
+            completed = 0
             for move in ordered:
                 child = board.copy()
                 child.apply_move(move)
-                score = self._search(child, depth - 1, alpha, beta)
+                score = self._search(child, depth - 1, alpha, beta, move, layer)
+                completed += 1
                 if score > layer_best_score:
                     layer_best_score, layer_best_move = score, move
                 if score > alpha:
                     alpha = score
+                if self.record:
+                    self.record.stat(layer, dict(alpha=alpha, beta=beta, best=layer_best_move))
                 if timer.timeout:
                     break  # 单层内部也检查超时
 
             # 该层结论成为新的最优，且作为下一层的首选走法
             best_move, best_score = layer_best_move, layer_best_score
-            ordered = [m for m in ordered if m != layer_best_move] or ordered
-            ordered = [layer_best_move] + ordered
+            layer_complete = completed == len(ordered)
+            ordered = [layer_best_move] + [m for m in ordered if m != layer_best_move]
 
             # 更新思考状态并推送可视化
             self.think.depth = depth
@@ -110,8 +125,15 @@ class AlphaBetaAI(BaseAI):
             self.think.best_value = best_score
             self.think.elapsed = timer.elapsed()
             self.think.phase = f"迭代加深 · 第 {depth} 层"
+            if self.record:
+                status = "本层完成" if layer_complete else "本层未搜完"
+                self.record.event(layer, status, dict(move=best_move, score=best_score))
             self._emit(on_progress)
 
+        self.think.best_move = best_move
+        if not self.think.depth:
+            self.think.phase = "预算耗尽，采用首个候选"
+        self._progress = None
         log_debug(f"{self.label} 深度 {self.think.depth}，节点 {self._nodes}，"
                   f"选定 {best_move}，评分 {best_score:.1f}")
         self.think.finish()
@@ -133,60 +155,61 @@ class AlphaBetaAI(BaseAI):
 
     # -------------------- 搜索核心 --------------------
 
-    def _search(self, board, depth: int, alpha: float, beta: float) -> float:
+    def _search(self, board, depth: int, alpha: float, beta: float, move=None, parent=None) -> float:
         """
         递归极大极小搜索。返回值始终以 self.player（本 AI 一方）视角表示。
         """
         self._nodes += 1
+        maximizing = board.current_player == self.player
+        node = None
+        if self.record:
+            node = self.record.add(parent, move, "MAX" if maximizing else "MIN",
+                                   alpha=alpha, beta=beta)
+        if self._progress and self._timer.elapsed() >= self._next_update:
+            self.think.done = self._nodes
+            self.think.elapsed = self._timer.elapsed()
+            self._emit(self._progress)
+            self._next_update = self._timer.elapsed() + 0.1
 
         # 终局：直接返回极端分值
-        if board.game_over:
-            return self._terminal_score(board)
-
-        # 达到深度上限：启发式评估当前局面
-        if depth == 0:
-            return evaluate(board, self.player)
-
-        legal = candidate_moves(board)
+        legal = candidate_moves(board) if depth and not board.game_over else []
         if not legal:
-            # 当前方无合法步（如黑白棋被迫停手），直接评估局面交回上层判断
-            return evaluate(board, self.player)
+            score = self._terminal_score(board) if board.game_over else evaluate(board, self.player)
+            if node is not None:
+                self.record.returned(node, score, alpha, beta, "=")
+            return score
 
         ordered = sort_moves_by_heuristic(board, legal, board.current_player)
 
         # make/unmake：原地落子 + 回溯，取代每个分支一次 copy() + apply_move()。
         # 这样既省掉棋盘对象构造（象棋构造器还会重摆 32 枚棋子），也省掉
         # apply_move 里重复的合法性校验；try/finally 保证异常时也能还原。
-        if board.current_player == self.player:
-            # 极大层：轮到己方，追求最高分
-            best = -math.inf
-            for move in ordered:
-                if not board.push(move):
-                    continue
-                try:
-                    score = self._search(board, depth - 1, alpha, beta)
-                finally:
-                    board.pop()
+        initial_alpha, initial_beta = alpha, beta
+        best = -math.inf if maximizing else math.inf
+        for index, child_move in enumerate(ordered):
+            if not board.push(child_move):
+                continue
+            try:
+                score = self._search(board, depth - 1, alpha, beta, child_move, node)
+            finally:
+                board.pop()
+            if maximizing:
                 best = max(best, score)
                 alpha = max(alpha, best)
-                if beta <= alpha:      # 剪枝：后续分支不可能更优
-                    break
-            return best
-        else:
-            # 极小层：轮到对手，假设对手选择对己方最不利的走法
-            best = math.inf
-            for move in ordered:
-                if not board.push(move):
-                    continue
-                try:
-                    score = self._search(board, depth - 1, alpha, beta)
-                finally:
-                    board.pop()
+            else:
                 best = min(best, score)
                 beta = min(beta, best)
-                if beta <= alpha:      # 剪枝：后续分支不可能更差
-                    break
-            return best
+            if node is not None:
+                self.record.stat(node, dict(alpha=alpha, beta=beta))
+            if beta <= alpha:
+                if self.record:
+                    for skipped in ordered[index + 1:]:
+                        self.record.add(node, skipped, "剪枝跳过", alpha=alpha, beta=beta)
+                break
+        if node is not None:
+            bound = "≤" if best <= initial_alpha else "≥" if best >= initial_beta else "="
+            self.record.returned(node, best, alpha, beta, bound)
+        return best
 
     def _terminal_score(self, board) -> float:
         """终局局面打分：己方大胜、己方大败、平局分别给极端 / 中性分值。"""

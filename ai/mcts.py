@@ -44,6 +44,7 @@ import random
 from typing import Optional, Tuple, List
 
 from .base_ai import BaseAI
+from .analysis_log import record_search
 from .candidates import (
     candidate_moves, gomoku_winning_moves, gomoku_attack_points,
     gomoku_defense_points, gomoku_forced_move,
@@ -175,10 +176,12 @@ class MCTSAI(BaseAI):
         super().__init__(player, config)
         # 每步最大迭代次数 / 最大思考秒数,二者先到即停
         self.iterations = max(1, int(config.mcts_iterations))
+        self.record = None
         self.time_limit = float(config.mcts_time)
 
     # ==================== 对外接口:一次完整的决策 ====================
 
+    @record_search
     def select_move(self, board, on_progress=None) -> Optional[Tuple[int, int]]:
         """
         执行一轮 MCTS 迭代,返回根节点下最优走法。
@@ -223,29 +226,36 @@ class MCTSAI(BaseAI):
         # 根节点的 player 参数用 board.current_player,即「本节点将要落子的一方」。
         # state 传入副本,后续所有扩展 / 模拟都不会影响真实棋盘。
         root = _MCTSNode(board.copy(), None, None, board.current_player)
+        if self.record:
+            root.record_id = self.record.root
         iterations = 0
-        # 进度推送间隔:总迭代的 2%(至少 5 次、至多 200 次)推送一次可视化,
-        # 避免每迭代都回调导致界面重绘开销过大。
-        emit_interval = max(5, min(200, self.iterations // 50))
+        # 在一次回传结束后取样，限制快照构建频率。
+        next_update = 0.0
 
         while iterations < self.iterations and not timer.timeout:
             node = self._tree_policy(root)          # 选择 + 扩展
-            outcome = self._rollout(node.state)     # 0~1 的本方胜率估计
+            rollout = [] if self.record and self.record.rollouts else None
+            outcome = self._rollout(node.state, rollout)     # 0~1 的本方胜率估计
             self._backpropagate(node, outcome)      # 回传统计
+            if self.record:
+                self.record.simulation(node, outcome, rollout)
             iterations += 1
 
             # 定期推送思考进度:迭代数、耗时、Top 候选胜率
-            if iterations % emit_interval == 0:
+            if on_progress and timer.elapsed() >= next_update:
                 self.think.done = iterations
                 self.think.elapsed = timer.elapsed()
                 self.think.phase = f"MCTS 模拟中 · {iterations}/{self.iterations}"
                 self._update_top_moves(root)
                 self._emit(on_progress)
+                next_update = timer.elapsed() + 0.1
 
         # ---- 3. 最终选步 ----
         # 极端情况:一次迭代都没能扩展出子节点(例如预算瞬间耗尽),
         # 退回到候选列表第一步,保证始终返回合法走法。
         if not root.children:
+            self.think.phase = "预算耗尽，采用首个候选"
+            self.think.best_move = legal[0]
             self.think.finish()
             return legal[0]
 
@@ -314,12 +324,14 @@ class MCTSAI(BaseAI):
         child_state = node.state.copy()
         child_state.apply_move(move)
         child = _MCTSNode(child_state, node, move, child_state.current_player)
+        if self.record:
+            child.record_id = self.record.add(node.record_id, move, "扩展")
         node.children.append(child)
         return child
 
     # ==================== 第三阶段:模拟(Rollout) ====================
 
-    def _rollout(self, state) -> float:
+    def _rollout(self, state, moves=None) -> float:
         """
         混合策略模拟(返回 0~1 的己方胜率估计)。
 
@@ -358,6 +370,8 @@ class MCTSAI(BaseAI):
                 sim.fast_apply(move)
             else:
                 sim.apply_move(move)
+            if moves is not None:
+                moves.append(move)
             steps += 1
 
         # 情况 A:模拟走到终局 —— 直接按真实胜负给分

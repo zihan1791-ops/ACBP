@@ -23,13 +23,19 @@
 可用 ACBP_AI_MODE=async|sync 显式覆盖；worker 异常会自动回退同步。
 """
 
+import os
+import subprocess
+import sys
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import Callable, List
 
 import pygame
 
 from . import theme, motion, assets, atmosphere, ai_runner
 from .board_view import BoardView
+from utils.paths import resolve_path
 from .widgets import Button, Panel, keyboard_nav
 from core.base_board import BLACK, WHITE
 from config import GAME_DEFAULTS
@@ -102,6 +108,10 @@ class GameScene:
 
         self.buttons: List[Button] = []
         self._chess_selected = None   # 象棋两段式点击的已选起点
+        self._analysis_dir = os.environ.get("ACBP_ANALYSIS_DIR")
+        self._analysis_window = None
+        if self._analysis_dir:
+            self._enable_recording()
         self._build_buttons(panel_rect)
 
     # ===================== 控件构建 =====================
@@ -129,6 +139,31 @@ class GameScene:
                          font_size=theme.FONT_BODY, accent=accent)
             btn.reveal_delay = 320 + i * theme.MOTION["stagger"]
             self.buttons.append(btn)
+
+        if any(self.ctrl.players[s].ai.name in ("mcts", "alphabeta") for s in self._ai_sides()):
+            rect = (panel_rect.right - s(168), panel_rect.y + s(13), s(144), s(34))
+            self.buttons.append(Button(rect, "搜索分析器", self._open_analyzer, font_size=15))
+
+    def _enable_recording(self):
+        for side in self._ai_sides():
+            self.ctrl.players[side].ai.analysis_dir = self._analysis_dir
+
+    def _open_analyzer(self):
+        if self._analysis_window and self._analysis_window.poll() is None:
+            self.ctrl.last_event = "搜索分析器已打开"
+            return
+        if not self._analysis_dir:
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+            self._analysis_dir = str(Path(resolve_path(self.ctrl.config.records_dir)) / "analysis" / stamp)
+        try:
+            Path(self._analysis_dir).mkdir(parents=True, exist_ok=True)
+            self._analysis_window = subprocess.Popen(
+                [sys.executable, resolve_path("analyzer.py"), self._analysis_dir],
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            self._enable_recording()
+            self.ctrl.last_event = "已开启搜索记录，从下一次 AI 搜索开始"
+        except OSError as exc:
+            self.ctrl.last_event = f"分析器打开失败：{exc}"
 
     def _finish(self) -> None:
         """围棋：手动结束对局，触发简化数子判定胜负。"""
@@ -240,9 +275,12 @@ class GameScene:
                 return
             ai.think.reset(ai.name, player.player_id)
             self.ctrl.ai_thinking = True
+            task_config = self.ctrl.config.to_dict()
+            if ai.name in ("mcts", "alphabeta"):
+                task_config["analysis_dir"] = self._analysis_dir
             if not runner.submit(self.ctrl.board.copy(), ai.name,
                                  player.player_id,
-                                 self.ctrl.config.to_dict()):
+                                 task_config):
                 self._fallback_sync("AI 任务提交失败，已回退同步模式")
                 return
             self._ai_submit_at = time.monotonic()
@@ -683,6 +721,10 @@ class GameScene:
     def _fmt_coord(self, move) -> str:
         if not move:
             return "—"
+        if self.ctrl.game_kind == "chess":
+            from core.chess.board import decode_sq, ROWS
+            squares = [decode_sq(index) for index in move]
+            return "→".join(f"{chr(65 + col)}{ROWS - row}" for row, col in squares)
         n = self.ctrl.board.size
         col = chr(65 + move[1]) if move[1] < 26 else str(move[1])
         return "%s%d" % (col, n - move[0])
