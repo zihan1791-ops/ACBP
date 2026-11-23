@@ -438,6 +438,7 @@ class MainMenu:
         s = theme.S
         w, h = theme.window_size(self.cfg)
         surface.blit(atmosphere.paper(w, h), (0, 0))
+        surface.blit(assets.watermark("gpt", s(450)), (s(148), s(175)))
         atmosphere.masthead(surface, w, "开局设定")
 
         # 左栏：竖排宋体刊名 + 朱砂竖线，无装饰副刊名

@@ -434,6 +434,9 @@ class GameScene:
         self._draw_check_alert(surface)
 
         self.panel.draw(surface)
+        stamp = assets.watermark("claude", s(155))
+        surface.blit(stamp, stamp.get_rect(topright=(self.panel.rect.right - s(20),
+                                                     self.panel.rect.top + s(54))))
         self._draw_status(surface)
         self._draw_think_panel(surface)
         self._draw_move_log(surface)

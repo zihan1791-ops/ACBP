@@ -11,6 +11,7 @@
 反复创建 Font 对象——AI 思考回调里每帧都会重绘，这一点很关键。
 """
 
+from functools import lru_cache
 import os
 
 import pygame
@@ -164,3 +165,13 @@ def font_report() -> None:
     for kind in ("display", "body", "mono"):
         path = _resolve(kind)
         print("  font %-8s -> %s" % (kind, path or "FALLBACK (default pygame font)"))
+
+@lru_cache(maxsize=12)
+def watermark(character: str, height: int) -> pygame.Surface:
+    """按显示尺寸缓存透明人物墨印，保留下方的纸纹。"""
+    path = os.path.join(os.path.dirname(__file__), "art", character + ".png")
+    portrait = pygame.image.load(path).convert_alpha()
+    width = max(1, round(height * portrait.get_width() / portrait.get_height()))
+    stamp = pygame.transform.smoothscale(portrait, (width, height))
+    stamp.set_alpha(100)
+    return stamp

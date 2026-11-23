@@ -460,6 +460,7 @@ class ReplayScene:
                          lines: List[str]) -> None:
         """左栏：竖排宋体刊名 + 朱砂竖线 + 少量有信息量的说明。"""
         s = self.s
+        surface.blit(assets.watermark("deepseek", s(380)), (s(155), s(160)))
         vt = assets.vertical("display", s(44), zh, theme.INK, s(8))
         p = motion.reveal(self.born, 60, theme.MOTION["base"])
         blit_reveal(surface, vt, (s(72), s(130)), p, 20)
@@ -521,6 +522,9 @@ class ReplayScene:
             self.board_view.draw(surface)
         if self.panel is not None:
             self.panel.draw(surface)
+            stamp = assets.watermark("deepseek", self.s(194))
+            surface.blit(stamp, stamp.get_rect(topright=(self.panel.rect.right - self.s(20),
+                                                         self.panel.rect.top + self.s(8))))
             self._draw_panel(surface)
 
     def _draw_panel(self, surface: pygame.Surface) -> None:
